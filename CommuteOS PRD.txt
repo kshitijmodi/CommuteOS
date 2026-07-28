@@ -1,0 +1,101 @@
+# PRD: AI CommuteOS — Personal Mobility Agent
+
+## 1. Vision
+Not a transit app. A personal mobility decision engine — an AI layer that sits on top of transit, walking, driving, and eventually flight data, and answers one question continuously: "Given who this person is and what's happening right now, what should they do?"
+
+Transit is the first domain because it has the highest-frequency decision points (twice a day, every day) and the richest signal to learn from. But the architecture — preference model + real-time inputs + decision engine + natural-language delivery — is domain-agnostic by design, so "expand to driving/flights/bike share" isn't a roadmap slide, it's a consequence of how Phase 2 is built.
+
+One-liner (resume/pitch deck): Built an AI mobility agent that learns a commuter's routing preferences and reliability tolerance, then proactively recommends real-time travel decisions across transit modes — not just displays transit data.
+
+## 2. Problem Statement
+Transit apps are stateless. Every session starts from zero — they don't know this is your 47th Tuesday taking the 8:15 from Grove Street, or that you'd rather stand on a slower, more reliable train than gamble on a faster one that's delayed twice a week. The decision-making work is done by the human, every single day, from raw data. That's the gap.
+
+## 3. Target User & Core Use Case
+Primary persona: the routine commuter with a real choice between modes — someone who could take PATH or NJ Transit or a bus, where the "best" option changes day to day based on delays. This is a better initial persona than "any transit rider," because a single-mode rider doesn't need a decision engine, just a notification engine.
+
+Secondary persona (Phase 3+): the person whose day has variable end times (meetings, appointments) where "when should I leave" depends on calendar data, not just fixed schedule.
+
+## 4. Success Metrics
+Product metrics (what you'd track with real users): daily active decision-taken rate, recommendation accuracy (predicted vs. actual arrival delta), retention at day 7/30.
+
+Portfolio metrics (what matters now): a working demo with real personalization logic visible, a clean PRD/README, and a defensible answer to "how is this different from Transit App or Google Maps."
+
+## 5. Differentiation
+Existing apps optimize route-finding. AI CommuteOS optimizes a specific person's utility function — a weighted blend of speed, reliability, walking tolerance, and transfer aversion that the app estimates from behavior rather than asking the user to configure it upfront.
+
+The moat isn't "AI" — it's the fitted per-user preference model plus the outcome-tracking loop that keeps improving it. "Memory" alone is what Transit App's saved-routes feature already does.
+
+## 6. Phased Build
+
+### Phase 1 — Real-Time Multi-Agency Transit Intelligence
+Goal: A working, shippable Android app with zero backend. Credibility layer — it has to just work before AI gets layered on.
+
+Features:
+- Live MTA subway arrivals (GTFS-RT, public and stable)
+- Live NJ Transit updates (requires developer registration — apply week 1, longest lead-time item)
+- PATH arrivals — treat as beta tier given feed reliability risk; fallback to scheduled times with a "live data unavailable" flag rather than showing stale data as live
+- Bus tracking, service alerts, interactive map (MapLibre + OSM)
+- Favorite stations/routes (local device storage only — not the personalization layer, just a shortcut list)
+
+Explicit non-goal: no recommendations, no "you should." Phase 1 only answers "what exists right now" — its job is to prove the data pipeline works and start generating usage data for Phase 2.
+
+Architecture:
+Android App (Flutter) -> GTFS-RT parsers (per agency, isolated — one agency's feed breaking shouldn't break the others) -> MTA (public) | NJ Transit (registered API) | PATH (community feed, degrade gracefully)
+
+Exit criteria: you personally use it daily on your own commute for two weeks without opening the MTA/NJ Transit apps instead.
+
+### Phase 2 — Personal Commute Memory
+Goal: Move from "app that shows data" to "app that has a model of you."
+
+Learned signals:
+- Home/office location — inferred from most common start/end points over ~5 trips, confirmed once via a simple prompt
+- Typical departure time — rolling median of actual app-open/trip-start times per weekday, inferred
+- Walking tolerance — distance the user accepts before usage data shows they picked a farther/less-crowded station, inferred
+- Reliability vs. speed preference — needs a lightweight explicit input (single onboarding slider: "arrive on time" vs. "arrive fastest") since the tradeoff is rarely observable naturally; refined over time with observed choices
+- Transfer aversion — frequency of choosing a direct-but-slower route over a faster-with-transfer route, when both were shown, inferred
+
+Data model (Postgres, not vector store):
+- users (id, home_lat/lng, office_lat/lng, reliability_pref)
+- trips (id, user_id, start_time, mode, origin_stop, dest_stop, predicted_arrival, actual_arrival, was_recommendation_followed)
+- preferences (user_id, walking_tolerance_m, transfer_aversion_score, updated_at) — recomputed nightly from trips, not live
+
+Why not vector memory / RAG: these attributes are structured and low-cardinality — a handful of numeric preferences per user, not unstructured documents to retrieve. RAG adds latency, cost, and a failure mode (retrieval returning the wrong "memory") for data that fits cleanly in five columns. Save the LLM for Phase 3, where its job is turning a decision into a sentence — not making the decision itself.
+
+Architecture:
+Android App -> FastAPI Backend -> PostgreSQL (trips, preferences) -> Nightly batch job: recompute preference scores from trip history
+
+Exit criteria: the app can state, in plain data (not yet AI-phrased), "this user prefers reliability over speed, tolerates 0.3mi walks, prefers direct routes" — demonstrably derived from real usage, not defaults.
+
+### Phase 3 — AI Commute Agent
+Goal: Proactive, personalized, correctly-hedged recommendations.
+
+Decision engine (deterministic, not LLM):
+Input: live delay data (all modes) + user's preference scores + today's calendar end-time (optional, stretch)
+Output: ranked list of {mode, depart_by_time, predicted_arrival, confidence}
+Rules/weighted-scoring based — e.g., a route's score = predicted_arrival_time − (reliability_weight × recent_delay_variance). Explainable, fast, cheap to run on every notification trigger.
+
+LLM's job — narrow and specific: take the engine's output and phrase it naturally, e.g. turning {mode: NJT, depart_by: 8:05, confidence: 0.82} into "Your usual PATH has a 12-min delay. NJ Transit's currently faster — leave by 8:05 to make your 8:45." Low-temperature, strict-system-prompt generation, fed only the engine's structured output — never given raw trip history to reason over freely, avoiding the highest-risk hallucination: inventing a departure time.
+
+Trust-preserving design choices:
+- Always show the underlying delay number, not just the recommendation
+- Track was_recommendation_followed and actual_arrival so the app can honestly report its own accuracy over time
+- Confidence framing in language calibrated to the engine's actual confidence score, not overstated
+
+Exit criteria: recommendation accuracy (predicted vs. actual arrival) tracked and visible.
+
+## 7. Longer-Term Expansion (Phase 4+, architecture-only for now)
+Because preferences, decision engine, and delivery layer are mode-agnostic, adding a new mode (driving, bike share, flights) is "add a data source + a scoring dimension," not a rebuild. Worth one paragraph in the pitch deck, not more — over-promising the "operating system for how humans move through cities" framing before Phase 1 ships risks reading as scope-inflation.
+
+## 8. Key Risks
+1. PATH data reliability — mitigated with graceful degradation, not solved
+2. NJ Transit API approval lead time — apply immediately, treat as a Phase 1 blocker to sequence around
+3. Cold start — Phase 3 recommendations are only as good as Phase 2's data; needs ~2 weeks of a user's own trip history before recommendations should be trusted
+4. Wrong-recommendation cost is high — a bad output here has a real consequence (missed train), which is why the decision engine is deterministic and the LLM's scope is deliberately narrow
+
+## 9. Tech Stack
+- Mobile: Flutter
+- Backend: FastAPI + PostgreSQL
+- AI: Gemini/OpenAI API for phrasing only, low temperature, structured input
+- Maps: MapLibre + OSM
+- Data: GTFS-RT per agency, isolated per-feed error handling
+- Addition: nightly batch job for preference recomputation, not live inference — keeps AI cost near-zero and the "learning" transparent and debuggable
