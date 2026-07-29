@@ -12,7 +12,8 @@ Full product rationale lives in [`CommuteOS PRD.txt`](./CommuteOS%20PRD.txt). Op
 
 - Flutter project scaffolded (`flutter create`), package id `com.commuteos.commuteos`
 - Dev toolchain verified working: Flutter 3.44.8 (stable), JDK 17, Android SDK (build-tools 36.0.0), `flutter doctor` clean for Android target
-- No feature code yet — next up is the MTA GTFS-RT integration
+- **MTA live subway arrivals working end-to-end** (`lib/mta/`) — fetches the unauthenticated MTA GTFS-realtime feed, parses the protobuf `TripUpdate`s, and renders live arrivals for a hardcoded stop (Union Square, N/Q/R/W northbound). Verified on an Android emulator against the real feed.
+- Next up: NJ Transit and PATH feeds (pending NJ Transit developer registration — see `OPEN_QUESTIONS.md`), then a station picker/map instead of the hardcoded stop
 
 ## Getting started
 
