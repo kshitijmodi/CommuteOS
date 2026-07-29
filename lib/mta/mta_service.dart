@@ -1,6 +1,7 @@
 import 'package:gtfs_realtime_bindings/gtfs_realtime_bindings.dart';
 import 'package:http/http.dart' as http;
 
+import '../transit/transit_models.dart';
 import 'mta_arrival.dart';
 import 'mta_feed.dart';
 import 'mta_station.dart';
@@ -10,7 +11,7 @@ import 'mta_station.dart';
 /// Isolated per agency/feed by design: a parse or network failure here
 /// surfaces as a thrown [MtaFeedException] rather than taking down other
 /// feeds (PATH, NJ Transit) that may be wired up alongside this one later.
-class MtaService {
+class MtaService implements TransitService {
   MtaService({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
@@ -113,6 +114,26 @@ class MtaService {
     return byDirection;
   }
 
+  @override
+  Future<TransitArrivalsResult> getArrivals(TransitStation station) async {
+    final byDirection = await getArrivalsForStation(station as MtaStation);
+    return TransitArrivalsResult(
+      arrivalsByDirectionKey: {
+        for (final entry in byDirection.entries)
+          entry.key: [
+            for (final arrival in entry.value)
+              TransitArrival(
+                routeLabel: arrival.routeId,
+                arrivalTime: arrival.arrivalTime,
+              ),
+          ],
+      },
+      // MTA's feed has no separate "is this stale" signal beyond fetch
+      // success/failure — if the fetch succeeded at all, treat it as live.
+      isLive: true,
+    );
+  }
+
   Future<List<MtaArrival>> _getArrivalsForAnyStop(
     MtaFeed feed,
     Set<String> stopIds,
@@ -152,6 +173,7 @@ class MtaService {
     return arrivals;
   }
 
+  @override
   void dispose() => _client.close();
 }
 

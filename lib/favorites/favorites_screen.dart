@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../mta/mta_station.dart';
-import '../mta/mta_station_repository.dart';
-import '../mta/natural_sort.dart';
-import '../mta/station_group.dart';
-import '../mta/station_search_screen.dart';
+import '../transit/natural_sort.dart';
+import '../transit/station_directory.dart';
+import '../transit/station_group.dart';
+import '../transit/station_list_tile.dart';
+import '../transit/station_search_screen.dart';
+import '../transit/transit_models.dart';
 import 'favorites_repository.dart';
-import 'station_list_tile.dart';
 
 /// Home screen: the user's favorited stations, with a way to reach the full
 /// searchable station list to add more.
@@ -18,32 +18,26 @@ class FavoritesScreen extends StatefulWidget {
 }
 
 class _FavoritesScreenState extends State<FavoritesScreen> {
-  final _stationRepository = MtaStationRepository();
+  final _stationDirectory = StationDirectory();
   final _favoritesRepository = FavoritesRepository();
-  late Future<List<MtaStation>> _stationsFuture;
-  Set<String> _favoriteIds = {};
+  late Future<List<TransitStation>> _stationsFuture;
+  Set<String> _favoriteKeys = {};
 
   @override
   void initState() {
     super.initState();
-    _stationsFuture = _stationRepository.loadStations();
+    _stationsFuture = _stationDirectory.loadAllStations();
     _loadFavorites();
   }
 
   Future<void> _loadFavorites() async {
-    final ids = await _favoritesRepository.loadFavoriteIds();
-    if (mounted) setState(() => _favoriteIds = ids);
+    final keys = await _favoritesRepository.loadFavoriteKeys();
+    if (mounted) setState(() => _favoriteKeys = keys);
   }
 
-  Future<void> _setFavorite(MtaStation station, bool isFavorite) async {
-    setState(() {
-      if (isFavorite) {
-        _favoriteIds.add(station.gtfsStopId);
-      } else {
-        _favoriteIds.remove(station.gtfsStopId);
-      }
-    });
-    await _favoritesRepository.setFavorite(station.gtfsStopId, isFavorite);
+  Future<void> _removeFavorite(TransitStation station) async {
+    await _favoritesRepository.setFavorite(station, false);
+    await _loadFavorites();
   }
 
   Future<void> _openSearch() async {
@@ -67,7 +61,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<List<MtaStation>>(
+      body: FutureBuilder<List<TransitStation>>(
         future: _stationsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -82,12 +76,16 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             );
           }
 
-          final stations = snapshot.data ?? const <MtaStation>[];
+          final stations = snapshot.data ?? const <TransitStation>[];
           // Each favorited station is its own row here — the user already
           // picked a specific station when favoriting, even if its name is
           // shared with another (unconnected) station elsewhere.
           final favorites =
-              stations.where((s) => _favoriteIds.contains(s.gtfsStopId)).toList()
+              stations
+                  .where(
+                    (s) => _favoritesRepository.isFavorite(_favoriteKeys, s),
+                  )
+                  .toList()
                 ..sort((a, b) => compareStationNames(a.name, b.name));
 
           if (favorites.isEmpty) {
@@ -128,7 +126,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                 group: StationGroup(name: station.name, stations: [station]),
                 isStationFavorite: (_) => true,
                 onStationFavoriteToggle: (s, isFav) {
-                  if (!isFav) _setFavorite(s, false);
+                  if (!isFav) _removeFavorite(s);
                 },
               );
             },

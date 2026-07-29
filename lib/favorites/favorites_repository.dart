@@ -1,27 +1,37 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Persists the user's favorited station IDs on-device (Phase 1 has no
+import '../transit/transit_models.dart';
+
+/// Persists the user's favorited stations on-device (Phase 1 has no
 /// backend/account, so favorites are local-only and don't sync across
 /// devices).
 ///
-/// Stores MTA stations' `gtfsStopId` values. Not agency-namespaced yet since
-/// only MTA exists today; if NJ Transit/PATH stations are added later and
-/// their IDs could collide with MTA's, prefix keys per agency at that point.
+/// Keys are namespaced per agency ("mta:R20", "path:JSQ") since a station
+/// id is only guaranteed unique within its own agency — MTA's alphanumeric
+/// GTFS stop_ids and PATH's short station codes don't collide today, but
+/// there's no guarantee that holds once NJ Transit is added too.
 class FavoritesRepository {
-  static const _prefsKey = 'favorite_station_ids';
+  static const _prefsKey = 'favorite_station_keys';
 
-  Future<Set<String>> loadFavoriteIds() async {
+  String _keyFor(TransitStation station) =>
+      '${station.agency.name}:${station.id}';
+
+  Future<Set<String>> loadFavoriteKeys() async {
     final prefs = await SharedPreferences.getInstance();
     return (prefs.getStringList(_prefsKey) ?? const []).toSet();
   }
 
-  Future<void> setFavorite(String stationId, bool isFavorite) async {
+  bool isFavorite(Set<String> favoriteKeys, TransitStation station) =>
+      favoriteKeys.contains(_keyFor(station));
+
+  Future<void> setFavorite(TransitStation station, bool isFavorite) async {
     final prefs = await SharedPreferences.getInstance();
     final current = (prefs.getStringList(_prefsKey) ?? const []).toSet();
+    final key = _keyFor(station);
     if (isFavorite) {
-      current.add(stationId);
+      current.add(key);
     } else {
-      current.remove(stationId);
+      current.remove(key);
     }
     await prefs.setStringList(_prefsKey, current.toList());
   }

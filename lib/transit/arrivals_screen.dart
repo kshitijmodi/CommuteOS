@@ -2,27 +2,34 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'mta_arrival.dart';
-import 'mta_service.dart';
-import 'mta_station.dart';
+import '../mta/mta_service.dart';
+import '../path/path_service.dart';
+import 'transit_models.dart';
 
-/// Shows live arrivals for a station, split into north/south tabs.
+/// Shows live arrivals for a station, split into direction tabs. Works for
+/// any agency — the concrete [TransitService] is chosen based on
+/// [TransitStation.agency].
 ///
-/// MTA refreshes feed data roughly every 30s server-side; polling faster
-/// than that just re-fetches the same snapshot.
+/// Refresh interval is a compromise across agencies: MTA's feed updates
+/// ~30s server-side; PATH's updates ~15s. Polling every 30s avoids hammering
+/// either feed while staying well within "fresh enough for a next-train
+/// display."
 class ArrivalsScreen extends StatefulWidget {
   const ArrivalsScreen({super.key, required this.station});
 
-  final MtaStation station;
+  final TransitStation station;
 
   @override
   State<ArrivalsScreen> createState() => _ArrivalsScreenState();
 }
 
 class _ArrivalsScreenState extends State<ArrivalsScreen> {
-  final _service = MtaService();
+  late final TransitService _service = switch (widget.station.agency) {
+    Agency.mta => MtaService(),
+    Agency.path => PathService(),
+  };
   Timer? _timer;
-  Future<Map<String, List<MtaArrival>>>? _future;
+  Future<TransitArrivalsResult>? _future;
 
   @override
   void initState() {
@@ -33,7 +40,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 
   void _refresh() {
     setState(() {
-      _future = _service.getArrivalsForStation(widget.station);
+      _future = _service.getArrivals(widget.station);
     });
   }
 
@@ -46,26 +53,23 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final station = widget.station;
-    final hasNorth = station.northLabel.isNotEmpty;
-    final hasSouth = station.southLabel.isNotEmpty;
-    final tabs = [
-      if (hasNorth) (label: station.northLabel, stopId: station.northStopId),
-      if (hasSouth) (label: station.southLabel, stopId: station.southStopId),
-    ];
+    final directions = widget.station.directions;
+    final tabCount = directions.isEmpty ? 1 : directions.length;
 
     return DefaultTabController(
-      length: tabs.isEmpty ? 1 : tabs.length,
+      length: tabCount,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(station.name),
-          bottom: tabs.isEmpty
+          title: Text(widget.station.name),
+          bottom: directions.isEmpty
               ? null
-              : TabBar(tabs: [for (final t in tabs) Tab(text: t.label)]),
+              : TabBar(
+                  tabs: [for (final d in directions) Tab(text: d.label)],
+                ),
         ),
         body: RefreshIndicator(
           onRefresh: () async => _refresh(),
-          child: FutureBuilder<Map<String, List<MtaArrival>>>(
+          child: FutureBuilder<TransitArrivalsResult>(
             future: _future,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -76,21 +80,44 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
                   'Live data unavailable:\n${snapshot.error}',
                 );
               }
-              if (tabs.isEmpty) {
+              if (directions.isEmpty) {
                 return _messageList('No direction data for this station.');
               }
 
-              final byDirection = snapshot.data ?? const {};
-              return TabBarView(
+              final result = snapshot.data!;
+              return Column(
                 children: [
-                  for (final t in tabs)
-                    _ArrivalsList(
-                      arrivals: byDirection[t.stopId] ?? const [],
+                  if (!result.isLive) _staleBanner(context),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        for (final d in directions)
+                          _ArrivalsList(
+                            arrivals:
+                                result.arrivalsByDirectionKey[d.key] ??
+                                const [],
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               );
             },
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _staleBanner(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: Theme.of(context).colorScheme.errorContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Text(
+        'Live data unavailable — showing the last known estimate.',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onErrorContainer,
         ),
       ),
     );
@@ -111,7 +138,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 class _ArrivalsList extends StatelessWidget {
   const _ArrivalsList({required this.arrivals});
 
-  final List<MtaArrival> arrivals;
+  final List<TransitArrival> arrivals;
 
   @override
   Widget build(BuildContext context) {
@@ -136,11 +163,12 @@ class _ArrivalsList extends StatelessWidget {
         final arrival = arrivals[index];
         final minutes = arrival.timeUntilArrival.inMinutes;
         return ListTile(
-          leading: CircleAvatar(child: Text(arrival.routeId)),
+          leading: CircleAvatar(child: Text(arrival.routeLabel)),
           title: Text(minutes <= 0 ? 'Arriving now' : '$minutes min'),
           subtitle: Text(
-            '${arrival.arrivalTime.hour.toString().padLeft(2, '0')}:'
-            '${arrival.arrivalTime.minute.toString().padLeft(2, '0')}',
+            arrival.headSign ??
+                '${arrival.arrivalTime.hour.toString().padLeft(2, '0')}:'
+                    '${arrival.arrivalTime.minute.toString().padLeft(2, '0')}',
           ),
         );
       },

@@ -1,23 +1,23 @@
-import 'mta_station.dart';
 import 'natural_sort.dart';
+import 'transit_models.dart';
 
-/// One row in the station list UI: a station name, plus every [MtaStation]
-/// that shares that name (whether or not they share a physical complex).
+/// One row in the station list UI: a station name, plus every
+/// [TransitStation] (across any agency) that shares that name.
 ///
 /// Most names map to exactly one station. When more than one exists —
-/// either multiple platforms of the same connected complex (e.g. Canal St's
-/// N/Q/R/W/J/Z/6 complex) or genuinely separate, unconnected stations that
-/// happen to share a name (e.g. two unrelated "86 St"s) — tapping the row
-/// should let the user pick which one they mean rather than guessing.
+/// multiple platforms of a connected complex, genuinely separate stations
+/// that happen to share a name, or (in principle) a name collision across
+/// agencies — tapping the row should let the user pick which one they mean
+/// rather than guessing.
 class StationGroup {
   const StationGroup({required this.name, required this.stations});
 
   final String name;
-  final List<MtaStation> stations;
+  final List<TransitStation> stations;
 
   bool get hasSingleStation => stations.length == 1;
 
-  /// All distinct route IDs across every station in this group, for the
+  /// All distinct route labels across every station in this group, for the
   /// list row's subtitle when there's more than one station to summarize.
   List<String> get allRoutes {
     final routes = <String>{};
@@ -28,8 +28,8 @@ class StationGroup {
     return sorted;
   }
 
-  static List<StationGroup> groupByName(List<MtaStation> stations) {
-    final byName = <String, List<MtaStation>>{};
+  static List<StationGroup> groupByName(List<TransitStation> stations) {
+    final byName = <String, List<TransitStation>>{};
     for (final station in stations) {
       byName.putIfAbsent(station.name, () => []).add(station);
     }

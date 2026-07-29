@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../favorites/favorites_repository.dart';
-import '../favorites/station_list_tile.dart';
-import 'mta_station.dart';
-import 'mta_station_repository.dart';
+import 'station_directory.dart';
 import 'station_group.dart';
+import 'station_list_tile.dart';
+import 'transit_models.dart';
 
-/// Full searchable list of every NYC subway station, reachable from the
-/// favorites screen. Each row can also be favorited/unfavorited from here.
+/// Full searchable list of every station across every agency, reachable
+/// from the favorites screen. Each row can also be favorited/unfavorited
+/// from here.
 class StationSearchScreen extends StatefulWidget {
   const StationSearchScreen({super.key});
 
@@ -16,36 +17,33 @@ class StationSearchScreen extends StatefulWidget {
 }
 
 class _StationSearchScreenState extends State<StationSearchScreen> {
-  final _stationRepository = MtaStationRepository();
+  final _stationDirectory = StationDirectory();
   final _favoritesRepository = FavoritesRepository();
   final _searchController = TextEditingController();
   late Future<List<StationGroup>> _groupsFuture;
-  Set<String> _favoriteIds = {};
+  Set<String> _favoriteKeys = {};
   String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _groupsFuture = _stationRepository
-        .loadStations()
+    _groupsFuture = _stationDirectory
+        .loadAllStations()
         .then(StationGroup.groupByName);
     _loadFavorites();
   }
 
   Future<void> _loadFavorites() async {
-    final ids = await _favoritesRepository.loadFavoriteIds();
-    if (mounted) setState(() => _favoriteIds = ids);
+    final keys = await _favoritesRepository.loadFavoriteKeys();
+    if (mounted) setState(() => _favoriteKeys = keys);
   }
 
-  Future<void> _toggleFavorite(MtaStation station, bool isFavorite) async {
+  Future<void> _toggleFavorite(TransitStation station, bool isFavorite) async {
     setState(() {
-      if (isFavorite) {
-        _favoriteIds.add(station.gtfsStopId);
-      } else {
-        _favoriteIds.remove(station.gtfsStopId);
-      }
+      _favoriteKeys = {..._favoriteKeys};
     });
-    await _favoritesRepository.setFavorite(station.gtfsStopId, isFavorite);
+    await _favoritesRepository.setFavorite(station, isFavorite);
+    await _loadFavorites();
   }
 
   @override
@@ -112,7 +110,7 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
               return StationListTile(
                 group: group,
                 isStationFavorite: (s) =>
-                    _favoriteIds.contains(s.gtfsStopId),
+                    _favoritesRepository.isFavorite(_favoriteKeys, s),
                 onStationFavoriteToggle: _toggleFavorite,
               );
             },

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:commuteos/mta/natural_sort.dart';
+import 'package:commuteos/transit/natural_sort.dart';
 
 void main() {
   test('numbered stations sort numerically, not as strings', () {

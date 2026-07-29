@@ -1,8 +1,9 @@
+import '../transit/transit_models.dart';
 import 'mta_feed.dart';
 
 /// A physical subway station (one or more platforms/entrances grouped
 /// under a single parent GTFS stop_id), parsed from MTA's Stations.csv.
-class MtaStation {
+class MtaStation implements TransitStation {
   const MtaStation({
     required this.gtfsStopId,
     required this.complexId,
@@ -25,10 +26,12 @@ class MtaStation {
   /// complex ID — that means they're unrelated, separate physical stations
   /// that happen to have the same name (e.g. two unconnected "86 St"s).
   final String complexId;
+  @override
   final String name;
   final String borough;
 
   /// Route IDs serving this station, e.g. ["N", "Q", "R", "W"].
+  @override
   final List<String> routes;
 
   /// Human-readable direction labels, e.g. "Uptown & Queens" / "Downtown &
@@ -44,6 +47,23 @@ class MtaStation {
       .map(MtaFeed.feedForRoute)
       .whereType<MtaFeed>()
       .toSet();
+
+  @override
+  Agency get agency => Agency.mta;
+
+  @override
+  String get id => gtfsStopId;
+
+  @override
+  String get area => borough;
+
+  @override
+  List<TransitDirection> get directions => [
+    if (northLabel.isNotEmpty)
+      TransitDirection(label: northLabel, key: northStopId),
+    if (southLabel.isNotEmpty)
+      TransitDirection(label: southLabel, key: southStopId),
+  ];
 
   @override
   String toString() => '$name (${routes.join(" ")})';

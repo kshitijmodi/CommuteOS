@@ -1,8 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:commuteos/mta/mta_station.dart';
-import 'package:commuteos/mta/station_group.dart';
+import 'package:commuteos/path/path_station.dart';
+import 'package:commuteos/transit/station_group.dart';
 
-MtaStation _station({
+MtaStation _mtaStation({
   required String stopId,
   required String complexId,
   required String name,
@@ -22,8 +23,8 @@ MtaStation _station({
 void main() {
   test('stations with distinct names each get their own group', () {
     final groups = StationGroup.groupByName([
-      _station(stopId: 'A1', complexId: '1', name: '1 Av'),
-      _station(stopId: 'A2', complexId: '2', name: '2 Av'),
+      _mtaStation(stopId: 'A1', complexId: '1', name: '1 Av'),
+      _mtaStation(stopId: 'A2', complexId: '2', name: '2 Av'),
     ]);
 
     expect(groups.length, 2);
@@ -34,9 +35,9 @@ void main() {
     // Mirrors the real "Canal St" case: some share a complex, one doesn't —
     // grouping is still by name, since the UI needs a picker either way.
     final groups = StationGroup.groupByName([
-      _station(stopId: 'R23', complexId: '623', name: 'Canal St', routes: ['R', 'W']),
-      _station(stopId: 'Q01', complexId: '623', name: 'Canal St', routes: ['N', 'Q']),
-      _station(stopId: '135', complexId: '325', name: 'Canal St', routes: ['1']),
+      _mtaStation(stopId: 'R23', complexId: '623', name: 'Canal St', routes: ['R', 'W']),
+      _mtaStation(stopId: 'Q01', complexId: '623', name: 'Canal St', routes: ['N', 'Q']),
+      _mtaStation(stopId: '135', complexId: '325', name: 'Canal St', routes: ['1']),
     ]);
 
     expect(groups.length, 1);
@@ -47,11 +48,24 @@ void main() {
 
   test('groups sort by natural station-name order', () {
     final groups = StationGroup.groupByName([
-      _station(stopId: 'A', complexId: '1', name: '14 St'),
-      _station(stopId: 'B', complexId: '2', name: '2 Av'),
-      _station(stopId: 'C', complexId: '3', name: 'Astor Pl'),
+      _mtaStation(stopId: 'A', complexId: '1', name: '14 St'),
+      _mtaStation(stopId: 'B', complexId: '2', name: '2 Av'),
+      _mtaStation(stopId: 'C', complexId: '3', name: 'Astor Pl'),
     ]);
 
     expect(groups.map((g) => g.name).toList(), ['2 Av', '14 St', 'Astor Pl']);
+  });
+
+  test('stations from different agencies group together on name alone', () {
+    // No real-world collision today (verified against MTA's Stations.csv),
+    // but the grouping logic itself is agency-agnostic and should stay that
+    // way — this proves it doesn't silently assume a single agency's types.
+    final groups = StationGroup.groupByName([
+      _mtaStation(stopId: 'X1', complexId: '1', name: 'Newark'),
+      const PathStation(code: 'NWK', name: 'Newark', state: 'NJ'),
+    ]);
+
+    expect(groups.length, 1);
+    expect(groups.single.stations.length, 2);
   });
 }
