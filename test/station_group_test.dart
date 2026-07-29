@@ -68,4 +68,23 @@ void main() {
     expect(groups.length, 1);
     expect(groups.single.stations.length, 2);
   });
+
+  test(
+    'PATH stations at shared physical locations merge with MTA, not duplicate',
+    () {
+      // Regression test: PathStation.all previously used ordinal-suffixed
+      // names ("14th St", "23rd St", "33rd St") that didn't match MTA's
+      // exact station names ("14 St", "23 St", "33 St"), so tapping the
+      // MTA row never surfaced PATH trains and vice versa — two separate
+      // rows for what's actually one accessible physical location.
+      final groups = StationGroup.groupByName([
+        _mtaStation(stopId: '132', complexId: '166', name: '14 St', routes: ['1', '2', '3']),
+        PathStation.all.firstWhere((s) => s.code == '14S'),
+      ]);
+
+      expect(groups.length, 1);
+      expect(groups.single.stations.length, 2);
+      expect(groups.single.allRoutes, containsAll(['1', '2', '3', 'PATH']));
+    },
+  );
 }

@@ -51,10 +51,17 @@ class PathStation implements TransitStation {
     PathStation(code: 'NEW', name: 'Newport', state: 'NJ'),
     PathStation(code: 'WTC', name: 'World Trade Center', state: 'NY'),
     PathStation(code: 'CHR', name: 'Christopher St', state: 'NY'),
-    PathStation(code: '09S', name: '9th St', state: 'NY'),
-    PathStation(code: '14S', name: '14th St', state: 'NY'),
-    PathStation(code: '23S', name: '23rd St', state: 'NY'),
-    PathStation(code: '33S', name: '33rd St', state: 'NY'),
+    // Named to match MTA's exact station-name convention (no ordinal
+    // suffix) for "9 St"/"14 St"/"23 St"/"33 St" so StationGroup.groupByName
+    // merges the PATH and MTA stations at the same physical location into
+    // one row instead of two separate ones. Verified against MTA's
+    // Stations.csv — MTA has an exact "33 St" (6 train) but no matching "9
+    // St"; kept "9 St" (not "9th St") anyway for naming consistency across
+    // the group, since it doesn't currently collide either way.
+    PathStation(code: '09S', name: '9 St', state: 'NY'),
+    PathStation(code: '14S', name: '14 St', state: 'NY'),
+    PathStation(code: '23S', name: '23 St', state: 'NY'),
+    PathStation(code: '33S', name: '33 St', state: 'NY'),
   ];
 
   @override
