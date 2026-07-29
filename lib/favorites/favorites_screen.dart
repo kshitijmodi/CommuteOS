@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../mta/mta_station.dart';
 import '../mta/mta_station_repository.dart';
+import '../mta/natural_sort.dart';
+import '../mta/station_group.dart';
 import '../mta/station_search_screen.dart';
 import 'favorites_repository.dart';
 import 'station_list_tile.dart';
@@ -33,9 +35,15 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     if (mounted) setState(() => _favoriteIds = ids);
   }
 
-  Future<void> _removeFavorite(MtaStation station) async {
-    setState(() => _favoriteIds.remove(station.gtfsStopId));
-    await _favoritesRepository.setFavorite(station.gtfsStopId, false);
+  Future<void> _setFavorite(MtaStation station, bool isFavorite) async {
+    setState(() {
+      if (isFavorite) {
+        _favoriteIds.add(station.gtfsStopId);
+      } else {
+        _favoriteIds.remove(station.gtfsStopId);
+      }
+    });
+    await _favoritesRepository.setFavorite(station.gtfsStopId, isFavorite);
   }
 
   Future<void> _openSearch() async {
@@ -75,11 +83,12 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           }
 
           final stations = snapshot.data ?? const <MtaStation>[];
+          // Each favorited station is its own row here — the user already
+          // picked a specific station when favoriting, even if its name is
+          // shared with another (unconnected) station elsewhere.
           final favorites =
-              stations
-                  .where((s) => _favoriteIds.contains(s.gtfsStopId))
-                  .toList()
-                ..sort((a, b) => a.name.compareTo(b.name));
+              stations.where((s) => _favoriteIds.contains(s.gtfsStopId)).toList()
+                ..sort((a, b) => compareStationNames(a.name, b.name));
 
           if (favorites.isEmpty) {
             return Center(
@@ -116,10 +125,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             itemBuilder: (context, index) {
               final station = favorites[index];
               return StationListTile(
-                station: station,
-                isFavorite: true,
-                onFavoriteToggle: (isFav) {
-                  if (!isFav) _removeFavorite(station);
+                group: StationGroup(name: station.name, stations: [station]),
+                isStationFavorite: (_) => true,
+                onStationFavoriteToggle: (s, isFav) {
+                  if (!isFav) _setFavorite(s, false);
                 },
               );
             },

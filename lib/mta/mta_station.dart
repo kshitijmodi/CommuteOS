@@ -5,6 +5,7 @@ import 'mta_feed.dart';
 class MtaStation {
   const MtaStation({
     required this.gtfsStopId,
+    required this.complexId,
     required this.name,
     required this.borough,
     required this.routes,
@@ -16,6 +17,14 @@ class MtaStation {
   /// Real-time stop_ids for this station are this value with an "N" or "S"
   /// suffix appended (NYCT convention, e.g. "R20N", "R20S").
   final String gtfsStopId;
+
+  /// MTA's own station-complex grouping ID. Stations that are physically
+  /// connected (e.g. a free in-system transfer between lines) share the
+  /// same complex ID even though each has its own `gtfsStopId` for
+  /// real-time lookups. Two stations can share a `name` without sharing a
+  /// complex ID — that means they're unrelated, separate physical stations
+  /// that happen to have the same name (e.g. two unconnected "86 St"s).
+  final String complexId;
   final String name;
   final String borough;
 

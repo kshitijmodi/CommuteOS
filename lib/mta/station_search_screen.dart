@@ -4,6 +4,7 @@ import '../favorites/favorites_repository.dart';
 import '../favorites/station_list_tile.dart';
 import 'mta_station.dart';
 import 'mta_station_repository.dart';
+import 'station_group.dart';
 
 /// Full searchable list of every NYC subway station, reachable from the
 /// favorites screen. Each row can also be favorited/unfavorited from here.
@@ -18,14 +19,16 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
   final _stationRepository = MtaStationRepository();
   final _favoritesRepository = FavoritesRepository();
   final _searchController = TextEditingController();
-  late Future<List<MtaStation>> _stationsFuture;
+  late Future<List<StationGroup>> _groupsFuture;
   Set<String> _favoriteIds = {};
   String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _stationsFuture = _stationRepository.loadStations();
+    _groupsFuture = _stationRepository
+        .loadStations()
+        .then(StationGroup.groupByName);
     _loadFavorites();
   }
 
@@ -74,8 +77,8 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
           ),
         ),
       ),
-      body: FutureBuilder<List<MtaStation>>(
-        future: _stationsFuture,
+      body: FutureBuilder<List<StationGroup>>(
+        future: _groupsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -89,12 +92,12 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
             );
           }
 
-          final stations = snapshot.data ?? const <MtaStation>[];
+          final groups = snapshot.data ?? const <StationGroup>[];
           final query = _query.trim().toLowerCase();
           final filtered = query.isEmpty
-              ? stations
-              : stations
-                    .where((s) => s.name.toLowerCase().contains(query))
+              ? groups
+              : groups
+                    .where((g) => g.name.toLowerCase().contains(query))
                     .toList();
 
           if (filtered.isEmpty) {
@@ -105,11 +108,12 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
             itemCount: filtered.length,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
-              final station = filtered[index];
+              final group = filtered[index];
               return StationListTile(
-                station: station,
-                isFavorite: _favoriteIds.contains(station.gtfsStopId),
-                onFavoriteToggle: (isFav) => _toggleFavorite(station, isFav),
+                group: group,
+                isStationFavorite: (s) =>
+                    _favoriteIds.contains(s.gtfsStopId),
+                onStationFavoriteToggle: _toggleFavorite,
               );
             },
           );

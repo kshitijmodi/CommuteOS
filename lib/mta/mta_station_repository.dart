@@ -2,6 +2,7 @@ import 'package:csv/csv.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'mta_station.dart';
+import 'natural_sort.dart';
 
 /// Loads and caches the bundled MTA station list (assets/data/mta_stations.csv,
 /// MTA's published "Stations.csv" — one row per physical station, pre-joined
@@ -20,6 +21,7 @@ class MtaStationRepository {
 
     final header = rows.first.cast<String>();
     final stopIdCol = header.indexOf('GTFS Stop ID');
+    final complexIdCol = header.indexOf('Complex ID');
     final nameCol = header.indexOf('Stop Name');
     final boroughCol = header.indexOf('Borough');
     final routesCol = header.indexOf('Daytime Routes');
@@ -37,6 +39,7 @@ class MtaStationRepository {
 
       stations[stopId] = MtaStation(
         gtfsStopId: stopId,
+        complexId: row[complexIdCol].toString(),
         name: row[nameCol].toString(),
         borough: row[boroughCol].toString(),
         routes: row[routesCol]
@@ -50,7 +53,7 @@ class MtaStationRepository {
     }
 
     final result = stations.values.toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+      ..sort((a, b) => compareStationNames(a.name, b.name));
     _cache = result;
     return result;
   }
