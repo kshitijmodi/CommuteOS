@@ -4,6 +4,8 @@ A personal mobility decision engine — not a transit app. It learns a commuter'
 
 Full product rationale lives in [`CommuteOS PRD.txt`](./CommuteOS%20PRD.txt). Open decisions and pending items are tracked in [`OPEN_QUESTIONS.md`](./OPEN_QUESTIONS.md).
 
+**Scope decisions:** NYC-metro only (no plans to expand to other cities); a real multi-user product with accounts starting in Phase 2, not a single-user personal tool.
+
 ## Current phase
 
 **Phase 1 — Real-Time Multi-Agency Transit Intelligence.** No backend, no recommendations yet. Goal is a working Android app that surfaces live MTA/NJ Transit/PATH data reliably. Exit criteria: daily personal use for two weeks without falling back to the official agency apps.
