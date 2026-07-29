@@ -22,4 +22,22 @@ enum MtaFeed {
 
   Uri get uri =>
       Uri.parse('https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/$pathSuffix');
+
+  /// Maps a route ID (e.g. "N", "6", "SIR") to the feed that carries its
+  /// real-time updates. Not derivable from static GTFS — MTA doesn't publish
+  /// this mapping in routes.txt/stops.txt, so it's hardcoded here. Rarely
+  /// changes (only when a whole new line/shuttle is added).
+  static const Map<String, MtaFeed> _routeToFeed = {
+    '1': numbered, '2': numbered, '3': numbered, '4': numbered,
+    '5': numbered, '6': numbered, '7': numbered, 'S': numbered, 'GS': numbered,
+    'A': ace, 'C': ace, 'E': ace, 'H': ace, 'SR': ace,
+    'B': bdfm, 'D': bdfm, 'F': bdfm, 'M': bdfm, 'FS': bdfm, 'SF': bdfm,
+    'G': g,
+    'J': jz, 'Z': jz,
+    'N': nqrw, 'Q': nqrw, 'R': nqrw, 'W': nqrw,
+    'L': l,
+    'SI': sir, 'SIR': sir,
+  };
+
+  static MtaFeed? feedForRoute(String routeId) => _routeToFeed[routeId];
 }

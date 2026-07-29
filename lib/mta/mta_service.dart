@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 
 import 'mta_arrival.dart';
 import 'mta_feed.dart';
+import 'mta_station.dart';
 
 /// Fetches and parses a single MTA GTFS-RT feed.
 ///
@@ -68,6 +69,86 @@ class MtaService {
     }
 
     arrivals.sort((a, b) => a.arrivalTime.compareTo(b.arrivalTime));
+    return arrivals;
+  }
+
+  /// Fetches arrivals at [station] for both directions, across every feed
+  /// the station's routes require (some stations, e.g. transfer complexes,
+  /// span more than one feed). A feed that fails to fetch/parse doesn't
+  /// block the others — its arrivals are just omitted.
+  ///
+  /// Returns a map from stop_id (north/south) to that direction's arrivals.
+  Future<Map<String, List<MtaArrival>>> getArrivalsForStation(
+    MtaStation station,
+  ) async {
+    final wantedStopIds = {station.northStopId, station.southStopId};
+    final byDirection = <String, List<MtaArrival>>{
+      station.northStopId: [],
+      station.southStopId: [],
+    };
+
+    await Future.wait(
+      station.feeds.map((feed) async {
+        List<MtaArrival> allArrivalsAtStation;
+        try {
+          allArrivalsAtStation = await _getArrivalsForAnyStop(
+            feed,
+            wantedStopIds,
+          );
+        } catch (_) {
+          // Isolated per feed: one feed failing shouldn't blank out arrivals
+          // this station gets from its other feed(s), if any.
+          return;
+        }
+
+        for (final arrival in allArrivalsAtStation) {
+          byDirection[arrival.stopId]?.add(arrival);
+        }
+      }),
+    );
+
+    for (final list in byDirection.values) {
+      list.sort((a, b) => a.arrivalTime.compareTo(b.arrivalTime));
+    }
+    return byDirection;
+  }
+
+  Future<List<MtaArrival>> _getArrivalsForAnyStop(
+    MtaFeed feed,
+    Set<String> stopIds,
+  ) async {
+    final response = await _client.get(feed.uri);
+    if (response.statusCode != 200) {
+      throw MtaFeedException(
+        'MTA feed ${feed.name} returned HTTP ${response.statusCode}',
+      );
+    }
+
+    final message = FeedMessage.fromBuffer(response.bodyBytes);
+    final arrivals = <MtaArrival>[];
+    for (final entity in message.entity) {
+      if (!entity.hasTripUpdate()) continue;
+      final tripUpdate = entity.tripUpdate;
+      final routeId = tripUpdate.trip.routeId;
+
+      for (final stopTimeUpdate in tripUpdate.stopTimeUpdate) {
+        if (!stopIds.contains(stopTimeUpdate.stopId)) continue;
+        if (!stopTimeUpdate.hasArrival()) continue;
+
+        final epochSeconds = stopTimeUpdate.arrival.time.toInt();
+        if (epochSeconds <= 0) continue;
+
+        arrivals.add(
+          MtaArrival(
+            routeId: routeId,
+            stopId: stopTimeUpdate.stopId,
+            arrivalTime: DateTime.fromMillisecondsSinceEpoch(
+              epochSeconds * 1000,
+            ),
+          ),
+        );
+      }
+    }
     return arrivals;
   }
 
