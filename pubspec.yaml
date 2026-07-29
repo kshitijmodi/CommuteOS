@@ -42,6 +42,9 @@ dependencies:
   # Parsing the bundled MTA static station list (assets/data/mta_stations.csv)
   csv: ^6.0.0
 
+  # Local on-device persistence for favorite stations (Phase 1: no backend)
+  shared_preferences: ^2.5.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'arrivals_screen.dart';
+import '../favorites/favorites_repository.dart';
+import '../favorites/station_list_tile.dart';
 import 'mta_station.dart';
 import 'mta_station_repository.dart';
 
-/// Home screen: search/browse every NYC subway station, tap one for its
-/// live arrivals.
+/// Full searchable list of every NYC subway station, reachable from the
+/// favorites screen. Each row can also be favorited/unfavorited from here.
 class StationSearchScreen extends StatefulWidget {
   const StationSearchScreen({super.key});
 
@@ -14,15 +15,34 @@ class StationSearchScreen extends StatefulWidget {
 }
 
 class _StationSearchScreenState extends State<StationSearchScreen> {
-  final _repository = MtaStationRepository();
+  final _stationRepository = MtaStationRepository();
+  final _favoritesRepository = FavoritesRepository();
   final _searchController = TextEditingController();
   late Future<List<MtaStation>> _stationsFuture;
+  Set<String> _favoriteIds = {};
   String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _stationsFuture = _repository.loadStations();
+    _stationsFuture = _stationRepository.loadStations();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    final ids = await _favoritesRepository.loadFavoriteIds();
+    if (mounted) setState(() => _favoriteIds = ids);
+  }
+
+  Future<void> _toggleFavorite(MtaStation station, bool isFavorite) async {
+    setState(() {
+      if (isFavorite) {
+        _favoriteIds.add(station.gtfsStopId);
+      } else {
+        _favoriteIds.remove(station.gtfsStopId);
+      }
+    });
+    await _favoritesRepository.setFavorite(station.gtfsStopId, isFavorite);
   }
 
   @override
@@ -35,7 +55,7 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CommuteOS'),
+        title: const Text('All Stations'),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56),
           child: Padding(
@@ -86,16 +106,10 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final station = filtered[index];
-              return ListTile(
-                title: Text(station.name),
-                subtitle: Text('${station.borough} · ${station.routes.join(" ")}'),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ArrivalsScreen(station: station),
-                    ),
-                  );
-                },
+              return StationListTile(
+                station: station,
+                isFavorite: _favoriteIds.contains(station.gtfsStopId),
+                onFavoriteToggle: (isFav) => _toggleFavorite(station, isFav),
               );
             },
           );

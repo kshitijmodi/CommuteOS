@@ -13,8 +13,9 @@ Full product rationale lives in [`CommuteOS PRD.txt`](./CommuteOS%20PRD.txt). Op
 - Flutter project scaffolded (`flutter create`), package id `com.commuteos.commuteos`
 - Dev toolchain verified working: Flutter 3.44.8 (stable), JDK 17, Android SDK (build-tools 36.0.0), `flutter doctor` clean for Android target
 - **MTA live subway arrivals working end-to-end** (`lib/mta/`) — fetches the unauthenticated MTA GTFS-realtime feed, parses the protobuf `TripUpdate`s, and renders live arrivals.
-- **All ~496 NYC subway stations searchable** — bundles MTA's published station list (`assets/data/mta_stations.csv`) as a local asset; the app opens to a searchable list of every station, and tapping one shows live arrivals split into uptown/downtown (or the station's actual direction labels) tabs. Verified on an Android emulator against the real feed for multiple stations.
-- Next up: NJ Transit and PATH feeds (pending NJ Transit developer registration — see `OPEN_QUESTIONS.md`), then favorites so a routine commuter doesn't have to search every time
+- **All ~496 NYC subway stations searchable** — bundles MTA's published station list (`assets/data/mta_stations.csv`) as a local asset; tapping a station shows live arrivals split into uptown/downtown (or the station's actual direction labels) tabs. Verified on an Android emulator against the real feed for multiple stations.
+- **Favorites** (`lib/favorites/`) — the app now opens to a favorites list (local device storage only, no account/backend), with an empty state prompting a first search. Favorite/unfavorite a whole station via a star icon, shared between the favorites view and the full search screen so both stay in sync.
+- Next up: NJ Transit and PATH feeds (pending NJ Transit developer registration — see `OPEN_QUESTIONS.md`)
 
 ## Getting started
 
