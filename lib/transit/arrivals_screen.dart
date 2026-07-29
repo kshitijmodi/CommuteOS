@@ -163,7 +163,17 @@ class _ArrivalsList extends StatelessWidget {
         final arrival = arrivals[index];
         final minutes = arrival.timeUntilArrival.inMinutes;
         return ListTile(
-          leading: CircleAvatar(child: Text(arrival.routeLabel)),
+          leading: CircleAvatar(
+            child: Text(
+              arrival.routeLabel,
+              style: TextStyle(
+                fontSize: arrival.routeLabel.length > 2 ? 11 : null,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+            ),
+          ),
           title: Text(minutes <= 0 ? 'Arriving now' : '$minutes min'),
           subtitle: Text(
             arrival.headSign ??
