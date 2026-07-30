@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.Column("start_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column("mode", sa.String(), nullable=False),
         sa.Column("origin_stop", sa.String(), nullable=False),
-        sa.Column("dest_stop", sa.String(), nullable=False),
+        sa.Column("dest_stop", sa.String(), nullable=True),
         sa.Column("predicted_arrival", sa.DateTime(timezone=True), nullable=True),
         sa.Column("actual_arrival", sa.DateTime(timezone=True), nullable=True),
         sa.Column("was_recommendation_followed", sa.Boolean(), nullable=True),

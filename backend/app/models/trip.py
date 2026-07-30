@@ -26,7 +26,12 @@ class Trip(Base):
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     mode: Mapped[str] = mapped_column(String)  # e.g. "mta", "path", "njt"
     origin_stop: Mapped[str] = mapped_column(String)
-    dest_stop: Mapped[str] = mapped_column(String)
+
+    # Nullable: the app currently only knows which station the user viewed,
+    # not where they were headed - real destination capture needs a later
+    # route-planning feature. Null here means "unknown", not "same as
+    # origin" - never fill this with a guessed/duplicated value.
+    dest_stop: Mapped[str | None] = mapped_column(String, nullable=True)
 
     predicted_arrival: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

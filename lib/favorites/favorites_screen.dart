@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../account/account_screen.dart';
 import '../transit/natural_sort.dart';
 import '../transit/station_directory.dart';
 import '../transit/station_group.dart';
@@ -58,6 +59,13 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             icon: const Icon(Icons.search),
             tooltip: 'Search all stations',
             onPressed: _openSearch,
+          ),
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Account',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AccountScreen()),
+            ),
           ),
         ],
       ),

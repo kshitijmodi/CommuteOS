@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../account/trip_logger.dart';
 import '../mta/mta_service.dart';
 import '../path/path_service.dart';
 import 'transit_models.dart';
@@ -28,6 +29,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     Agency.mta => MtaService(),
     Agency.path => PathService(),
   };
+  final _tripLogger = TripLogger();
   Timer? _timer;
   Future<TransitArrivalsResult>? _future;
 
@@ -36,6 +38,12 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     super.initState();
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
+    // Fire-and-forget: a no-op for logged-out users (the common case today
+    // - see OPEN_QUESTIONS.md on auth being opt-in, not required to browse).
+    _tripLogger.logStationView(
+      mode: widget.station.agency.name,
+      originStop: widget.station.id,
+    );
   }
 
   void _refresh() {
