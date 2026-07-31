@@ -44,9 +44,13 @@ python -m venv .venv
 .venv\Scripts\pip install -e ".[dev]"
 copy .env.example .env    # then edit DATABASE_URL/SECRET_KEY as needed
 .venv\Scripts\python -m pytest        # run tests (SQLite, no Postgres needed)
-.venv\Scripts\python -m alembic upgrade head   # requires a running Postgres
-.venv\Scripts\python -m uvicorn app.main:app --reload
+.venv\Scripts\python -m alembic upgrade head   # requires a running local Postgres (see below)
+.venv\Scripts\python -m uvicorn app.main:app --port 8001 --reload
 ```
+
+Runs on **port 8001**, not FastAPI's usual 8000 default — this dev environment already has an unrelated project on 8000. Requires a local PostgreSQL instance with a `commuteos`/`commuteos` user and database (`CREATE USER commuteos WITH PASSWORD 'commuteos'; CREATE DATABASE commuteos OWNER commuteos;`), matching `DATABASE_URL` in `.env.example`.
+
+To reach this from a physical Android phone during development (the app's `apiBaseUrl` in `lib/account/api_config.dart` points at `localhost:8001`): plug the phone in via USB and run `adb reverse tcp:8001 tcp:8001` once per session before testing signup/login/trip logging — browsing and favorites work fine without this, since they never call the backend.
 
 ## Tech stack (per PRD)
 
