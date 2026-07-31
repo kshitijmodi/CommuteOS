@@ -1,7 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import auth, preferences, recommendations, trip_outcomes, trips, users
+from .routers import (
+    auth,
+    home_office,
+    preferences,
+    recommendations,
+    trip_outcomes,
+    trips,
+    users,
+)
 
 app = FastAPI(title="CommuteOS API", version="0.1.0")
 
@@ -20,6 +28,7 @@ app.include_router(trips.router)
 app.include_router(preferences.router)
 app.include_router(recommendations.router)
 app.include_router(trip_outcomes.router)
+app.include_router(home_office.router)
 
 
 @app.get("/health")

@@ -45,6 +45,11 @@ dependencies:
   # Local on-device persistence for favorite stations (Phase 1: no backend)
   shared_preferences: ^2.5.3
 
+  # Proactive daily reminder notifications (Phase 3) - local-only for now,
+  # see OPEN_QUESTIONS.md on why not Firebase Cloud Messaging yet.
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.10.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
