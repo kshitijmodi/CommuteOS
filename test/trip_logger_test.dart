@@ -38,7 +38,7 @@ void main() {
     final logger = TripLogger(
       authRepository: authRepository,
       client: MockClient((request) async {
-        capturedRequest = request as http.Request;
+        capturedRequest = request;
         return http.Response('{}', 201);
       }),
     );
