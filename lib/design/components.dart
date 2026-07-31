@@ -17,6 +17,17 @@ String agencyLabel(Agency agency) => switch (agency) {
   Agency.path => 'PATH',
 };
 
+/// Formats an arrival's absolute time as 12-hour clock time, e.g. "5:24 PM".
+/// Shown as a secondary detail alongside the "N min" countdown per user
+/// feedback that a relative-only countdown wasn't enough — a real station
+/// clock/Google Maps both show the actual time too, not just minutes-away.
+String formatClockTime(DateTime time) {
+  final hour12 = time.hour % 12 == 0 ? 12 : time.hour % 12;
+  final minute = time.minute.toString().padLeft(2, '0');
+  final period = time.hour < 12 ? 'AM' : 'PM';
+  return '$hour12:$minute $period';
+}
+
 /// NYCT's own published subway line colors (from their brand guidelines /
 /// GTFS `routes.txt` route_color field), keyed by route ID. MTA's GTFS-RT
 /// feed doesn't carry color data itself, so this is a small, hardcoded

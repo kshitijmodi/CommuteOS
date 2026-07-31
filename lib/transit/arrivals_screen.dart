@@ -235,13 +235,24 @@ class _ArrivalsList extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
-                  child: Text(
-                    arrival.headSign ??
-                        '${arrival.arrivalTime.hour.toString().padLeft(2, '0')}:'
-                            '${arrival.arrivalTime.minute.toString().padLeft(2, '0')}',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (arrival.headSign != null)
+                        Text(
+                          arrival.headSign!,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      Text(
+                        formatClockTime(arrival.arrivalTime),
+                        style: Theme.of(context).textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
                 MinutesAway(minutes: minutes),
