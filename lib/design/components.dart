@@ -17,6 +17,46 @@ String agencyLabel(Agency agency) => switch (agency) {
   Agency.path => 'PATH',
 };
 
+/// NYCT's own published subway line colors (from their brand guidelines /
+/// GTFS `routes.txt` route_color field), keyed by route ID. MTA's GTFS-RT
+/// feed doesn't carry color data itself, so this is a small, hardcoded
+/// lookup rather than something parsed at runtime — the official set is
+/// fixed and essentially never changes.
+const Map<String, Color> _mtaRouteColors = {
+  '1': Color(0xFFEE352E), '2': Color(0xFFEE352E), '3': Color(0xFFEE352E),
+  '4': Color(0xFF00933C), '5': Color(0xFF00933C), '6': Color(0xFF00933C),
+  '6X': Color(0xFF00933C),
+  '7': Color(0xFFB933AD), '7X': Color(0xFFB933AD),
+  'A': Color(0xFF0039A6), 'C': Color(0xFF0039A6), 'E': Color(0xFF0039A6),
+  'B': Color(0xFFFF6319), 'D': Color(0xFFFF6319), 'F': Color(0xFFFF6319),
+  'FX': Color(0xFFFF6319), 'M': Color(0xFFFF6319),
+  'G': Color(0xFF6CBE45),
+  'J': Color(0xFF996633), 'Z': Color(0xFF996633),
+  'L': Color(0xFFA7A9AC),
+  'N': Color(0xFFFCCC0A), 'Q': Color(0xFFFCCC0A), 'R': Color(0xFFFCCC0A),
+  'W': Color(0xFFFCCC0A),
+  'S': Color(0xFF808183), 'GS': Color(0xFF808183), 'FS': Color(0xFF808183),
+  'H': Color(0xFF808183),
+  'SI': Color(0xFF0039A6),
+};
+
+/// A route's real display color: NYCT's published color for an MTA route
+/// ID, or the feed-provided hex color(s) for a PATH arrival. Falls back to
+/// the agency's generic badge color if no real color is known (e.g. an
+/// MTA route ID this table doesn't recognize yet, or a PATH arrival
+/// missing/malformed lineColor data).
+Color routeColor({
+  required Agency agency,
+  required String routeLabel,
+  List<String> routeColors = const [],
+}) {
+  if (agency == Agency.path && routeColors.isNotEmpty) {
+    final hex = routeColors.first;
+    return Color(int.parse('FF$hex', radix: 16));
+  }
+  return _mtaRouteColors[routeLabel] ?? agencyColor(agency);
+}
+
 /// Shared visual building blocks used across screens, so the app reads as
 /// one considered product rather than each screen inventing its own row/
 /// card/empty-state style.
@@ -61,6 +101,46 @@ class AppBadge extends StatelessWidget {
           fontWeight: FontWeight.w700,
           letterSpacing: 0.3,
           color: filled ? const Color(0xFF00201A) : tint,
+        ),
+      ),
+    );
+  }
+}
+
+/// A small filled circle showing a route's real line color with its ID
+/// inside — e.g. a green "4" or a yellow "N" — matching how the route
+/// actually appears on real station signage/maps, not a generic agency
+/// color. Used anywhere a station's routes are listed (search/favorites
+/// rows), as opposed to [routeColor] applied to a single live arrival.
+class RouteChip extends StatelessWidget {
+  const RouteChip({super.key, required this.agency, required this.label});
+
+  final Agency agency;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    if (agency == Agency.path) {
+      return AppBadge('PATH', color: agencyColor(agency), dense: true);
+    }
+    final color = routeColor(agency: agency, routeLabel: label);
+    final onColor = color.computeLuminance() > 0.5
+        ? const Color(0xFF0B0E11)
+        : Colors.white;
+    return Container(
+      width: 22,
+      height: 22,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
+        style: TextStyle(
+          fontSize: label.length > 2 ? 8 : 10,
+          fontWeight: FontWeight.w700,
+          color: onColor,
         ),
       ),
     );

@@ -49,15 +49,28 @@ class TransitArrival {
     required this.routeLabel,
     required this.arrivalTime,
     this.headSign,
+    this.routeColors = const [],
   });
 
-  /// e.g. "N", "6" (MTA) or a PATH line label.
+  /// e.g. "N", "6" (MTA) or "PATH" (PATH doesn't label individual arrivals
+  /// by line today - see routeColors).
   final String routeLabel;
   final DateTime arrivalTime;
 
   /// Destination/headsign text if the agency provides one (PATH does;
   /// MTA's base GTFS-RT spec doesn't reliably).
   final String? headSign;
+
+  /// The real line color(s) for this specific arrival, as "RRGGBB" hex
+  /// strings (no leading '#') - straight from PATH's own feed, which
+  /// publishes an authentic `lineColor` per arrival (occasionally more
+  /// than one, comma-separated, for a train that runs via more than one
+  /// PATH line). Empty for MTA, whose GTFS-RT feed carries no color data -
+  /// MTA's routeLabel is instead looked up against a hardcoded table of
+  /// NYCT's own published line colors (see mtaRouteColor in
+  /// lib/design/components.dart), since the official colors are a small,
+  /// fixed set that essentially never changes.
+  final List<String> routeColors;
 
   Duration get timeUntilArrival => arrivalTime.difference(DateTime.now());
 }

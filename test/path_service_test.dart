@@ -66,6 +66,11 @@ void main() {
     expect(result.arrivalsByDirectionKey['ToNY']!.length, 2);
     expect(result.arrivalsByDirectionKey['ToNJ']!.length, 1);
     expect(result.arrivalsByDirectionKey['ToNY']!.first.routeLabel, 'PATH');
+    expect(result.arrivalsByDirectionKey['ToNY']!.first.routeColors, ['D93A30']);
+    expect(
+      result.arrivalsByDirectionKey['ToNY']!.last.routeColors,
+      ['4D92FB', 'FF9900'],
+    );
     expect(
       result.arrivalsByDirectionKey['ToNJ']!.first.headSign,
       'Newark',

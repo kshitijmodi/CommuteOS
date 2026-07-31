@@ -52,20 +52,21 @@ Future<TransitStation?> showStationPicker(
                         ),
                         child: Row(
                           children: [
-                            AppBadge(
-                              agencyLabel(station.agency),
-                              color: agencyColor(station.agency),
-                              dense: true,
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    station.routes.join(' '),
-                                    style: Theme.of(context).textTheme.bodyLarge,
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: station.agency == Agency.path
+                                        ? [RouteChip(agency: Agency.path, label: 'PATH')]
+                                        : [
+                                            for (final route in station.routes)
+                                              RouteChip(agency: Agency.mta, label: route),
+                                          ],
                                   ),
+                                  const SizedBox(height: 6),
                                   Text(
                                     station.area,
                                     style: Theme.of(context).textTheme.bodySmall,

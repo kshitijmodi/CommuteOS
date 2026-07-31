@@ -131,6 +131,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
                       children: [
                         for (final d in directions)
                           _ArrivalsList(
+                            agency: widget.station.agency,
                             arrivals:
                                 result.arrivalsByDirectionKey[d.key] ??
                                 const [],
@@ -176,8 +177,9 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 }
 
 class _ArrivalsList extends StatelessWidget {
-  const _ArrivalsList({required this.arrivals});
+  const _ArrivalsList({required this.agency, required this.arrivals});
 
+  final Agency agency;
   final List<TransitArrival> arrivals;
 
   @override
@@ -195,6 +197,17 @@ class _ArrivalsList extends StatelessWidget {
       itemBuilder: (context, index) {
         final arrival = arrivals[index];
         final minutes = arrival.timeUntilArrival.inMinutes;
+        final color = routeColor(
+          agency: agency,
+          routeLabel: arrival.routeLabel,
+          routeColors: arrival.routeColors,
+        );
+        // Real line color drives text-on-color contrast decisions too -
+        // MTA's yellow (N/Q/R/W) and light gray (L) both need dark text,
+        // everything else here reads fine in white.
+        final onColor = color.computeLuminance() > 0.5
+            ? const Color(0xFF0B0E11)
+            : Colors.white;
         return Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
@@ -207,17 +220,13 @@ class _ArrivalsList extends StatelessWidget {
                   width: 40,
                   height: 40,
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceRaised,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.border),
-                  ),
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
                   child: Text(
                     arrival.routeLabel,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: arrival.routeLabel.length > 2 ? 11 : 15,
-                      color: AppColors.textPrimary,
+                      color: onColor,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

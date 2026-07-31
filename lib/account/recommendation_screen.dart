@@ -179,20 +179,26 @@ class _SelectableStationRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final chips = station.agency == Agency.path
+        ? [RouteChip(agency: Agency.path, label: 'PATH')]
+        : [
+            for (final route in station.routes)
+              RouteChip(agency: Agency.mta, label: route),
+          ];
+
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: AppCard(
         onTap: () => onChanged(!selected),
         child: Row(
           children: [
-            AppBadge(agencyLabel(station.agency), color: agencyColor(station.agency), dense: true),
-            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(station.name, style: Theme.of(context).textTheme.bodyLarge),
-                  Text(station.routes.join(' '), style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 6, runSpacing: 6, children: chips),
                 ],
               ),
             ),

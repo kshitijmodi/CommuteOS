@@ -102,6 +102,7 @@ class PathService implements TransitService {
                 routeLabel: 'PATH',
                 arrivalTime: arrival.arrivalTime,
                 headSign: arrival.headSign,
+                routeColors: arrival.routeColors,
               ),
           ],
       },
@@ -131,6 +132,7 @@ class PathService implements TransitService {
       headSign: headSign,
       arrivalTime: DateTime.now().add(Duration(seconds: secondsToArrival)),
       lastUpdated: lastUpdated,
+      routeColors: parsePathRouteColors(message['lineColor'] as String?),
     );
   }
 

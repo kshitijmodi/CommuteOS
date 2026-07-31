@@ -48,12 +48,29 @@ class StationListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isFavorite = group.stations.any(isStationFavorite);
-    final agencies = group.hasSingleStation
-        ? [group.stations.first.agency]
-        : group.stations.map((s) => s.agency).toSet().toList();
-    final subtitle = group.hasSingleStation
-        ? '${group.stations.first.area} · ${group.stations.first.routes.join(" ")}'
-        : '${group.stations.length} stations · ${group.allRoutes.join(" ")}';
+    final area = group.hasSingleStation
+        ? group.stations.first.area
+        : '${group.stations.length} stations';
+
+    // One RouteChip per distinct (agency, route) pair, in a stable order,
+    // e.g. real MTA line colors for each route ID plus a single PATH chip
+    // rather than repeating "PATH" per line (PATH's routes list is agency-
+    // level only, not per-line - see PathStation.routes).
+    final seen = <String>{};
+    final chips = <Widget>[];
+    for (final station in group.stations) {
+      if (station.agency == Agency.path) {
+        if (seen.add('path')) {
+          chips.add(RouteChip(agency: Agency.path, label: 'PATH'));
+        }
+        continue;
+      }
+      for (final route in station.routes) {
+        if (seen.add('mta:$route')) {
+          chips.add(RouteChip(agency: Agency.mta, label: route));
+        }
+      }
+    }
 
     return Material(
       color: Colors.transparent,
@@ -65,11 +82,8 @@ class StationListTile extends StatelessWidget {
             vertical: 12,
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final agency in agencies) ...[
-                AppBadge(agencyLabel(agency), color: agencyColor(agency), dense: true),
-                const SizedBox(width: 6),
-              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,12 +94,18 @@ class StationListTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     Text(
-                      subtitle,
+                      area,
                       style: Theme.of(context).textTheme.bodySmall,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: chips,
                     ),
                   ],
                 ),
