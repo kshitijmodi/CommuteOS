@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'auth_repository.dart';
+import 'preferences_screen.dart';
+import 'recommendation_screen.dart';
 
 /// Optional account screen - browsing/favoriting never requires this.
 /// Signing in here is what turns on trip logging (see TripLogger), which
@@ -101,6 +103,26 @@ class _AccountScreenState extends State<AccountScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 24),
+                    FilledButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const PreferencesScreen(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.insights),
+                      label: const Text('What CommuteOS has learned'),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const RecommendationScreen(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.alt_route),
+                      label: const Text('What should I take?'),
+                    ),
+                    const SizedBox(height: 16),
                     OutlinedButton(
                       onPressed: _logout,
                       child: const Text('Log out'),
