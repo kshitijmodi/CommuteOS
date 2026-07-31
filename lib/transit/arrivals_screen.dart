@@ -176,91 +176,252 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   }
 }
 
-class _ArrivalsList extends StatelessWidget {
+/// Groups [arrivals] by destination (headsign), alphabetically by
+/// destination name — stable across refreshes, unlike first-seen order,
+/// which could otherwise jitter the chip/section order every ~30s poll if
+/// which destination happens to appear first in the feed changes. E.g. so
+/// a direction serving both Newark and Hoboken (WTC's "To New Jersey") can
+/// be shown as two clearly separated clusters instead of one interleaved
+/// list. Returns null if grouping wouldn't help — fewer than 2 distinct
+/// destinations, or no headsign data at all (MTA never provides one) —
+/// so callers can fall back to the plain flat list unchanged.
+Map<String, List<TransitArrival>>? groupArrivalsByDestination(
+  List<TransitArrival> arrivals,
+) {
+  if (arrivals.any((a) => a.headSign == null)) return null;
+  final byDestination = <String, List<TransitArrival>>{};
+  for (final arrival in arrivals) {
+    byDestination.putIfAbsent(arrival.headSign!, () => []).add(arrival);
+  }
+  if (byDestination.length <= 1) return null;
+  final sortedKeys = byDestination.keys.toList()..sort();
+  return {for (final key in sortedKeys) key: byDestination[key]!};
+}
+
+class _ArrivalsList extends StatefulWidget {
   const _ArrivalsList({required this.agency, required this.arrivals});
 
   final Agency agency;
   final List<TransitArrival> arrivals;
 
   @override
+  State<_ArrivalsList> createState() => _ArrivalsListState();
+}
+
+class _ArrivalsListState extends State<_ArrivalsList> {
+  /// null means "All destinations" — the filter chip row's default.
+  String? _selectedDestination;
+
+  @override
   Widget build(BuildContext context) {
-    if (arrivals.isEmpty) {
+    if (widget.arrivals.isEmpty) {
       return const EmptyState(
         icon: Icons.train_outlined,
         title: 'No upcoming arrivals found',
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      itemCount: arrivals.length,
-      itemBuilder: (context, index) {
-        final arrival = arrivals[index];
-        final minutes = arrival.timeUntilArrival.inMinutes;
-        final color = routeColor(
-          agency: agency,
-          routeLabel: arrival.routeLabel,
-          routeColors: arrival.routeColors,
-        );
-        // Real line color drives text-on-color contrast decisions too -
-        // MTA's yellow (N/Q/R/W) and light gray (L) both need dark text,
-        // everything else here reads fine in white.
-        final onColor = color.computeLuminance() > 0.5
-            ? const Color(0xFF0B0E11)
-            : Colors.white;
-        return Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: 6,
+    final groups = groupArrivalsByDestination(widget.arrivals);
+    if (groups == null) {
+      return _FlatArrivalsList(agency: widget.agency, arrivals: widget.arrivals);
+    }
+
+    // Reset back to "All" if a previously-selected destination disappears
+    // from the feed (e.g. the last Hoboken train of the night departs).
+    if (_selectedDestination != null && !groups.containsKey(_selectedDestination)) {
+      _selectedDestination = null;
+    }
+
+    final destinations = groups.keys.toList();
+    final visibleGroups = _selectedDestination == null
+        ? groups
+        : {_selectedDestination!: groups[_selectedDestination]!};
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            0,
           ),
-          child: AppCard(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                  child: Text(
-                    arrival.routeLabel,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: arrival.routeLabel.length > 2 ? 11 : 15,
-                      color: onColor,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                  ),
+                _DestinationChip(
+                  label: 'All',
+                  selected: _selectedDestination == null,
+                  onTap: () => setState(() => _selectedDestination = null),
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (arrival.headSign != null)
-                        Text(
-                          arrival.headSign!,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      Text(
-                        formatClockTime(arrival.arrivalTime),
-                        style: Theme.of(context).textTheme.bodySmall,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                for (final destination in destinations) ...[
+                  const SizedBox(width: 8),
+                  _DestinationChip(
+                    label: destination,
+                    selected: _selectedDestination == destination,
+                    onTap: () => setState(() => _selectedDestination = destination),
                   ),
-                ),
-                MinutesAway(minutes: minutes),
+                ],
               ],
             ),
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+            children: [
+              for (final entry in visibleGroups.entries) ...[
+                if (_selectedDestination == null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      4,
+                    ),
+                    child: Text(
+                      entry.key.toUpperCase(),
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                for (final arrival in entry.value)
+                  _ArrivalRow(agency: widget.agency, arrival: arrival),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DestinationChip extends StatelessWidget {
+  const _DestinationChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.accent : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: Border.all(
+            color: selected ? AppColors.accent : AppColors.border,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: selected ? const Color(0xFF00201A) : AppColors.textPrimary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FlatArrivalsList extends StatelessWidget {
+  const _FlatArrivalsList({required this.agency, required this.arrivals});
+
+  final Agency agency;
+  final List<TransitArrival> arrivals;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      itemCount: arrivals.length,
+      itemBuilder: (context, index) =>
+          _ArrivalRow(agency: agency, arrival: arrivals[index]),
+    );
+  }
+}
+
+class _ArrivalRow extends StatelessWidget {
+  const _ArrivalRow({required this.agency, required this.arrival});
+
+  final Agency agency;
+  final TransitArrival arrival;
+
+  @override
+  Widget build(BuildContext context) {
+    final minutes = arrival.timeUntilArrival.inMinutes;
+    final color = routeColor(
+      agency: agency,
+      routeLabel: arrival.routeLabel,
+      routeColors: arrival.routeColors,
+    );
+    // Real line color drives text-on-color contrast decisions too -
+    // MTA's yellow (N/Q/R/W) and light gray (L) both need dark text,
+    // everything else here reads fine in white.
+    final onColor = color.computeLuminance() > 0.5
+        ? const Color(0xFF0B0E11)
+        : Colors.white;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: 6,
+      ),
+      child: AppCard(
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              child: Text(
+                arrival.routeLabel,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: arrival.routeLabel.length > 2 ? 11 : 15,
+                  color: onColor,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (arrival.headSign != null)
+                    Text(
+                      arrival.headSign!,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  Text(
+                    formatClockTime(arrival.arrivalTime),
+                    style: Theme.of(context).textTheme.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            MinutesAway(minutes: minutes),
+          ],
+        ),
+      ),
     );
   }
 }
