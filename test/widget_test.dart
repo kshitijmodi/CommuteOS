@@ -19,6 +19,6 @@ void main() {
     await tester.pump();
 
     expect(find.text('CommuteOS'), findsOneWidget);
-    expect(find.text('No favorite stations yet.'), findsOneWidget);
+    expect(find.text('No favorite stations yet'), findsOneWidget);
   });
 }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../design/components.dart';
+import '../design/theme.dart';
 import 'auth_repository.dart';
 import 'preferences_screen.dart';
 import 'recommendation_screen.dart';
@@ -83,119 +85,203 @@ class _AccountScreenState extends State<AccountScreen> {
         future: _isLoggedInFuture,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoader();
           }
 
           if (snapshot.data == true) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.check_circle, size: 48, color: Colors.green),
-                    const SizedBox(height: 16),
-                    const Text('You are signed in.'),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'CommuteOS is now logging the stations you check to '
-                      'learn your commute over time.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    FilledButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const PreferencesScreen(),
+            return ListView(
+              padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  child: AppCard(
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.check_rounded,
+                            color: AppColors.accent,
+                          ),
                         ),
-                      ),
-                      icon: const Icon(Icons.insights),
-                      label: const Text('What CommuteOS has learned'),
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const RecommendationScreen(),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Signed in',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Learning your commute from the stations you check.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      icon: const Icon(Icons.alt_route),
-                      label: const Text('What should I take?'),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    OutlinedButton(
-                      onPressed: _logout,
-                      child: const Text('Log out'),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                const SectionHeader('Your commute'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: Column(
+                    children: [
+                      _NavRow(
+                        icon: Icons.insights_rounded,
+                        title: 'What CommuteOS has learned',
+                        subtitle: 'Your preferences, home & office stations',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PreferencesScreen(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _NavRow(
+                        icon: Icons.alt_route_rounded,
+                        title: 'What should I take?',
+                        subtitle: 'Compare routes right now',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const RecommendationScreen(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.xl,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  child: OutlinedButton(
+                    onPressed: _logout,
+                    child: const Text('Log out'),
+                  ),
+                ),
+              ],
             );
           }
 
-          return Padding(
-            padding: const EdgeInsets.all(24),
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.md),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
+                const SizedBox(height: AppSpacing.lg),
+                Text(
+                  'Welcome to CommuteOS',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
                   'Signing in lets CommuteOS learn your commute over time. '
                   'Browsing and favorites always work without an account.',
                   textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: AppSpacing.xl),
                 TextField(
                   controller: _emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    border: OutlineInputBorder(),
-                  ),
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  decoration: const InputDecoration(labelText: 'Email'),
                   keyboardType: TextInputType.emailAddress,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.sm),
                 TextField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    border: OutlineInputBorder(),
-                  ),
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  decoration: const InputDecoration(labelText: 'Password'),
                   obscureText: true,
                 ),
                 if (_errorMessage != null) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     _errorMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
+                    style: const TextStyle(color: AppColors.error, fontSize: 13),
                   ),
                 ],
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _isSubmitting
-                            ? null
-                            : () => _submit(isSignup: false),
-                        child: const Text('Log in'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _isSubmitting
-                            ? null
-                            : () => _submit(isSignup: true),
-                        child: const Text('Sign up'),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: AppSpacing.lg),
+                FilledButton(
+                  onPressed: _isSubmitting ? null : () => _submit(isSignup: true),
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF00201A),
+                          ),
+                        )
+                      : const Text('Sign up'),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                OutlinedButton(
+                  onPressed: _isSubmitting ? null : () => _submit(isSignup: false),
+                  child: const Text('Log in'),
                 ),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _NavRow extends StatelessWidget {
+  const _NavRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: onTap,
+      margin: const EdgeInsets.only(bottom: 0),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.accent),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.bodyLarge),
+                const SizedBox(height: 2),
+                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary),
+        ],
       ),
     );
   }

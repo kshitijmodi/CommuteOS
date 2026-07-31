@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../account/trip_logger.dart';
+import '../design/components.dart';
+import '../design/theme.dart';
 import '../mta/mta_service.dart';
 import '../path/path_service.dart';
 import 'transit_models.dart';
@@ -68,7 +70,27 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
       length: tabCount,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(widget.station.name),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.station.name, style: Theme.of(context).textTheme.titleLarge),
+              Row(
+                children: [
+                  AppBadge(
+                    agencyLabel(widget.station.agency),
+                    color: agencyColor(widget.station.agency),
+                    dense: true,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.station.area,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ],
+          ),
           bottom: directions.isEmpty
               ? null
               : TabBar(
@@ -76,20 +98,28 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
                 ),
         ),
         body: RefreshIndicator(
+          color: AppColors.accent,
+          backgroundColor: AppColors.surfaceRaised,
           onRefresh: () async => _refresh(),
           child: FutureBuilder<TransitArrivalsResult>(
             future: _future,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
+                return const AppLoader();
               }
               if (snapshot.hasError) {
                 return _messageList(
-                  'Live data unavailable:\n${snapshot.error}',
+                  Icons.wifi_off_rounded,
+                  'Live data unavailable',
+                  '${snapshot.error}',
                 );
               }
               if (directions.isEmpty) {
-                return _messageList('No direction data for this station.');
+                return _messageList(
+                  Icons.info_outline_rounded,
+                  'No direction data',
+                  'This station has no direction data available.',
+                );
               }
 
               final result = snapshot.data!;
@@ -120,26 +150,28 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   Widget _staleBanner(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: Theme.of(context).colorScheme.errorContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Text(
-        'Live data unavailable — showing the last known estimate.',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onErrorContainer,
-        ),
+      color: AppColors.warning.withValues(alpha: 0.12),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.schedule_rounded, size: 16, color: AppColors.warning),
+          const SizedBox(width: AppSpacing.sm),
+          const Expanded(
+            child: Text(
+              'Live data unavailable — showing the last known estimate.',
+              style: TextStyle(color: AppColors.warning, fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _messageList(String message) {
-    return ListView(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(message, textAlign: TextAlign.center),
-        ),
-      ],
-    );
+  Widget _messageList(IconData icon, String title, String message) {
+    return EmptyState(icon: icon, title: title, message: message);
   }
 }
 
@@ -151,42 +183,61 @@ class _ArrivalsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (arrivals.isEmpty) {
-      return ListView(
-        children: const [
-          Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'No upcoming arrivals found.',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
+      return const EmptyState(
+        icon: Icons.train_outlined,
+        title: 'No upcoming arrivals found',
       );
     }
 
-    return ListView.separated(
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       itemCount: arrivals.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final arrival = arrivals[index];
         final minutes = arrival.timeUntilArrival.inMinutes;
-        return ListTile(
-          leading: CircleAvatar(
-            child: Text(
-              arrival.routeLabel,
-              style: TextStyle(
-                fontSize: arrival.routeLabel.length > 2 ? 11 : null,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              softWrap: false,
-            ),
+        return Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 6,
           ),
-          title: Text(minutes <= 0 ? 'Arriving now' : '$minutes min'),
-          subtitle: Text(
-            arrival.headSign ??
-                '${arrival.arrivalTime.hour.toString().padLeft(2, '0')}:'
-                    '${arrival.arrivalTime.minute.toString().padLeft(2, '0')}',
+          child: AppCard(
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceRaised,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Text(
+                    arrival.routeLabel,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: arrival.routeLabel.length > 2 ? 11 : 15,
+                      color: AppColors.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    arrival.headSign ??
+                        '${arrival.arrivalTime.hour.toString().padLeft(2, '0')}:'
+                            '${arrival.arrivalTime.minute.toString().padLeft(2, '0')}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                MinutesAway(minutes: minutes),
+              ],
+            ),
           ),
         );
       },

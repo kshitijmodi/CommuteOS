@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../design/components.dart';
+import '../design/theme.dart';
 import '../favorites/favorites_repository.dart';
 import '../mta/mta_station.dart';
 import '../path/path_station.dart';
@@ -86,41 +88,40 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
         future: _favoritesFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoader();
           }
 
           final favorites = snapshot.data ?? const <TransitStation>[];
           if (favorites.length < 2) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Favorite at least two stations to compare them here.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
+            return const EmptyState(
+              icon: Icons.alt_route_rounded,
+              title: 'Not enough favorites yet',
+              message: 'Favorite at least two stations to compare them here.',
             );
           }
 
           return Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
+              const SectionHeader('Compare right now'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 child: Text(
-                  'Select two or more favorites to compare right now:',
+                  'Select two or more favorites to compare.',
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
+              const SizedBox(height: AppSpacing.sm),
               Expanded(
                 child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                   children: [
                     for (final station in favorites)
-                      CheckboxListTile(
-                        title: Text(station.name),
-                        subtitle: Text(station.routes.join(' ')),
-                        value: _selected.contains(station),
+                      _SelectableStationRow(
+                        station: station,
+                        selected: _selected.contains(station),
                         onChanged: (checked) {
                           setState(() {
-                            if (checked == true) {
+                            if (checked) {
                               _selected.add(station);
                             } else {
                               _selected.remove(station);
@@ -128,24 +129,76 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
                           });
                         },
                       ),
+                    const SizedBox(height: AppSpacing.sm),
                   ],
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(16),
-                child: FilledButton(
-                  onPressed: _selected.length >= 2 ? _getRecommendation : null,
-                  child: const Text('Get recommendation'),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  0,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _selected.length >= 2 ? _getRecommendation : null,
+                    child: const Text('Get recommendation'),
+                  ),
                 ),
               ),
               if (_recommendationFuture != null)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    0,
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                  ),
                   child: _RecommendationResult(future: _recommendationFuture!),
                 ),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _SelectableStationRow extends StatelessWidget {
+  const _SelectableStationRow({
+    required this.station,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final TransitStation station;
+  final bool selected;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: AppCard(
+        onTap: () => onChanged(!selected),
+        child: Row(
+          children: [
+            AppBadge(agencyLabel(station.agency), color: agencyColor(station.agency), dense: true),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(station.name, style: Theme.of(context).textTheme.bodyLarge),
+                  Text(station.routes.join(' '), style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            Checkbox(value: selected, onChanged: (v) => onChanged(v ?? false)),
+          ],
+        ),
       ),
     );
   }
@@ -162,34 +215,43 @@ class _RecommendationResult extends StatelessWidget {
       future: future,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: AppLoader(),
+          );
         }
         if (snapshot.hasError) {
-          return Text(
-            '${snapshot.error}',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          return AppCard(
+            child: Text(
+              '${snapshot.error}',
+              style: const TextStyle(color: AppColors.error),
+            ),
           );
         }
 
         final recommendation = snapshot.data!;
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  recommendation.message,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Confidence: ${(recommendation.confidence * 100).round()}%'
-                  '${recommendation.isLive ? '' : ' (live data unavailable)'}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
+        return AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Icon(Icons.bolt_rounded, color: AppColors.accent),
+                  LiveStatusPill(isLive: recommendation.isLive),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                recommendation.message,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Confidence: ${(recommendation.confidence * 100).round()}%',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ),
         );
       },

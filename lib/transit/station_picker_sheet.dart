@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../design/components.dart';
+import '../design/theme.dart';
 import 'station_group.dart';
 import 'transit_models.dart';
 
@@ -19,27 +21,71 @@ Future<TransitStation?> showStationPicker(
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                'Which "${group.name}"?',
-                style: Theme.of(context).textTheme.titleMedium,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Which "${group.name}"?',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ),
             ),
             Flexible(
-              child: ListView.separated(
+              child: ListView.builder(
                 shrinkWrap: true,
                 itemCount: group.stations.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final station = group.stations[index];
-                  return ListTile(
-                    title: Text(station.routes.join(' ')),
-                    subtitle: Text(station.area),
-                    onTap: () => Navigator.of(context).pop(station),
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(station),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            AppBadge(
+                              agencyLabel(station.agency),
+                              color: agencyColor(station.agency),
+                              dense: true,
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    station.routes.join(' '),
+                                    style: Theme.of(context).textTheme.bodyLarge,
+                                  ),
+                                  Text(
+                                    station.area,
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(
+                              Icons.chevron_right_rounded,
+                              color: AppColors.textTertiary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   );
                 },
               ),
             ),
+            const SizedBox(height: AppSpacing.sm),
           ],
         ),
       );

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../design/components.dart';
+import '../design/theme.dart';
 import 'arrivals_screen.dart';
 import 'station_group.dart';
 import 'station_picker_sheet.dart';
@@ -45,32 +47,71 @@ class StationListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFavorite = group.stations.any(isStationFavorite);
+    final agencies = group.hasSingleStation
+        ? [group.stations.first.agency]
+        : group.stations.map((s) => s.agency).toSet().toList();
     final subtitle = group.hasSingleStation
         ? '${group.stations.first.area} · ${group.stations.first.routes.join(" ")}'
         : '${group.stations.length} stations · ${group.allRoutes.join(" ")}';
 
-    final isFavorite = group.stations.any(isStationFavorite);
-
-    return ListTile(
-      title: Text(group.name),
-      subtitle: Text(subtitle),
-      trailing: IconButton(
-        icon: Icon(isFavorite ? Icons.star : Icons.star_border),
-        color: isFavorite ? Colors.amber[700] : null,
-        tooltip: isFavorite ? 'Remove from favorites' : 'Add to favorites',
-        onPressed: () async {
-          if (group.hasSingleStation) {
-            final station = group.stations.first;
-            onStationFavoriteToggle(station, !isStationFavorite(station));
-            return;
-          }
-          final picked = await showStationPicker(context, group);
-          if (picked != null) {
-            onStationFavoriteToggle(picked, !isStationFavorite(picked));
-          }
-        },
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _open(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 12,
+          ),
+          child: Row(
+            children: [
+              for (final agency in agencies) ...[
+                AppBadge(agencyLabel(agency), color: agencyColor(agency), dense: true),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      group.name,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                ),
+                color: isFavorite ? AppColors.accent : AppColors.textTertiary,
+                tooltip: isFavorite ? 'Remove from favorites' : 'Add to favorites',
+                onPressed: () async {
+                  if (group.hasSingleStation) {
+                    final station = group.stations.first;
+                    onStationFavoriteToggle(station, !isStationFavorite(station));
+                    return;
+                  }
+                  final picked = await showStationPicker(context, group);
+                  if (picked != null) {
+                    onStationFavoriteToggle(picked, !isStationFavorite(picked));
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
       ),
-      onTap: () => _open(context),
     );
   }
 }

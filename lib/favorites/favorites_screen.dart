@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../account/account_screen.dart';
+import '../design/components.dart';
+import '../design/theme.dart';
 import '../transit/natural_sort.dart';
 import '../transit/station_directory.dart';
 import '../transit/station_group.dart';
@@ -52,35 +53,18 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('CommuteOS'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: 'Search all stations',
-            onPressed: _openSearch,
-          ),
-          IconButton(
-            icon: const Icon(Icons.account_circle_outlined),
-            tooltip: 'Account',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AccountScreen()),
-            ),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('CommuteOS')),
       body: FutureBuilder<List<TransitStation>>(
         future: _stationsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoader();
           }
           if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('Failed to load stations:\n${snapshot.error}'),
-              ),
+            return EmptyState(
+              icon: Icons.error_outline_rounded,
+              title: 'Failed to load stations',
+              message: '${snapshot.error}',
             );
           }
 
@@ -97,47 +81,31 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                 ..sort((a, b) => compareStationNames(a.name, b.name));
 
           if (favorites.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'No favorite stations yet.',
-                      style: TextStyle(fontSize: 18),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Search for a station and tap the star to add it here.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _openSearch,
-                      icon: const Icon(Icons.search),
-                      label: const Text('Search stations'),
-                    ),
-                  ],
-                ),
+            return EmptyState(
+              icon: Icons.star_border_rounded,
+              title: 'No favorite stations yet',
+              message: 'Search for a station and tap the star to add it here.',
+              action: FilledButton.icon(
+                onPressed: _openSearch,
+                icon: const Icon(Icons.search_rounded),
+                label: const Text('Search stations'),
               ),
             );
           }
 
-          return ListView.separated(
-            itemCount: favorites.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final station = favorites[index];
-              return StationListTile(
-                group: StationGroup(name: station.name, stations: [station]),
-                isStationFavorite: (_) => true,
-                onStationFavoriteToggle: (s, isFav) {
-                  if (!isFav) _removeFavorite(s);
-                },
-              );
-            },
+          return ListView(
+            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+            children: [
+              SectionHeader('Favorites · ${favorites.length}'),
+              for (final station in favorites)
+                StationListTile(
+                  group: StationGroup(name: station.name, stations: [station]),
+                  isStationFavorite: (_) => true,
+                  onStationFavoriteToggle: (s, isFav) {
+                    if (!isFav) _removeFavorite(s);
+                  },
+                ),
+            ],
           );
         },
       ),

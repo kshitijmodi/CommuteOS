@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'favorites/favorites_screen.dart';
+import 'design/root_shell.dart';
+import 'design/theme.dart';
 
 void main() {
   runApp(const CommuteOSApp());
@@ -13,8 +14,9 @@ class CommuteOSApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'CommuteOS',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
-      home: const FavoritesScreen(),
+      debugShowCheckedModeBanner: false,
+      theme: buildAppTheme(),
+      home: const RootShell(),
     );
   }
 }

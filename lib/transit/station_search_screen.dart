@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../design/components.dart';
+import '../design/theme.dart';
 import '../favorites/favorites_repository.dart';
 import 'station_directory.dart';
 import 'station_group.dart';
 import 'station_list_tile.dart';
 import 'transit_models.dart';
 
-/// Full searchable list of every station across every agency, reachable
-/// from the favorites screen. Each row can also be favorited/unfavorited
-/// from here.
+/// Full searchable list of every station across every agency. Each row can
+/// also be favorited/unfavorited from here.
 class StationSearchScreen extends StatefulWidget {
   const StationSearchScreen({super.key});
 
@@ -56,19 +57,38 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('All Stations'),
+        title: const Text('Search'),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
+          preferredSize: const Size.fromHeight(64),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
             child: TextField(
               controller: _searchController,
-              decoration: const InputDecoration(
-                hintText: 'Search stations…',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Search all stations…',
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  color: AppColors.textTertiary,
+                ),
                 isDense: true,
-                filled: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                ),
               ),
               onChanged: (value) => setState(() => _query = value),
             ),
@@ -79,14 +99,13 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
         future: _groupsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoader();
           }
           if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('Failed to load stations:\n${snapshot.error}'),
-              ),
+            return EmptyState(
+              icon: Icons.error_outline_rounded,
+              title: 'Failed to load stations',
+              message: '${snapshot.error}',
             );
           }
 
@@ -99,21 +118,22 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
                     .toList();
 
           if (filtered.isEmpty) {
-            return const Center(child: Text('No stations match your search.'));
+            return const EmptyState(
+              icon: Icons.search_off_rounded,
+              title: 'No stations match your search',
+            );
           }
 
-          return ListView.separated(
-            itemCount: filtered.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final group = filtered[index];
-              return StationListTile(
-                group: group,
-                isStationFavorite: (s) =>
-                    _favoritesRepository.isFavorite(_favoriteKeys, s),
-                onStationFavoriteToggle: _toggleFavorite,
-              );
-            },
+          return ListView(
+            children: [
+              for (final group in filtered)
+                StationListTile(
+                  group: group,
+                  isStationFavorite: (s) =>
+                      _favoritesRepository.isFavorite(_favoriteKeys, s),
+                  onStationFavoriteToggle: _toggleFavorite,
+                ),
+            ],
           );
         },
       ),

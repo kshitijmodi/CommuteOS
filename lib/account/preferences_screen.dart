@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../design/components.dart';
+import '../design/theme.dart';
 import 'commute_notification_service.dart';
 import 'home_office_repository.dart';
 import 'preferences_repository.dart';
@@ -89,19 +91,15 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
         future: _preferencesFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoader();
           }
 
           final preferences = snapshot.data;
           if (preferences == null) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Log in to see what CommuteOS has learned about your commute.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
+            return const EmptyState(
+              icon: Icons.insights_outlined,
+              title: 'Nothing learned yet',
+              message: 'Log in to see what CommuteOS has learned about your commute.',
             );
           }
 
@@ -113,7 +111,12 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
               : 'You weigh speed and reliability about evenly.';
 
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.xl,
+            ),
             children: [
               FutureBuilder<HomeOffice?>(
                 future: _homeOfficeFuture,
@@ -128,38 +131,72 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                         homeOffice: homeOffice,
                         onConfirm: _confirmHomeOffice,
                       ),
-                      if (homeOffice.confirmed)
-                        SwitchListTile(
-                          title: const Text('Daily commute reminder'),
-                          subtitle: const Text(
-                            'A local notification each morning to check '
-                            'today\'s recommendation (7:45 AM).',
+                      if (homeOffice.confirmed) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        AppCard(
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.notifications_none_rounded,
+                                color: AppColors.textSecondary,
+                              ),
+                              const SizedBox(width: AppSpacing.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Daily commute reminder',
+                                      style: Theme.of(context).textTheme.bodyLarge,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'A local notification each morning at 7:45 AM.',
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: _reminderEnabled,
+                                onChanged: _toggleReminder,
+                              ),
+                            ],
                           ),
-                          value: _reminderEnabled,
-                          onChanged: _toggleReminder,
                         ),
+                      ],
+                      const SizedBox(height: AppSpacing.md),
                     ],
                   );
                 },
               ),
-              const SizedBox(height: 8),
-              _PreferenceTile(
-                icon: Icons.directions_walk,
-                title: 'Walking tolerance',
-                value: '${walkingMiles.toStringAsFixed(2)} mi',
+              const SectionHeader('Learned preferences'),
+              AppCard(
+                child: Column(
+                  children: [
+                    _PreferenceRow(
+                      icon: Icons.directions_walk_rounded,
+                      title: 'Walking tolerance',
+                      value: '${walkingMiles.toStringAsFixed(2)} mi',
+                    ),
+                    const Divider(height: AppSpacing.lg),
+                    _PreferenceRow(
+                      icon: Icons.compare_arrows_rounded,
+                      title: 'Transfer aversion',
+                      value: '${(preferences.transferAversionScore * 100).round()}%',
+                    ),
+                  ],
+                ),
               ),
-              _PreferenceTile(
-                icon: Icons.compare_arrows,
-                title: 'Transfer aversion',
-                value:
-                    '${(preferences.transferAversionScore * 100).round()}%',
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.md),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(reliabilityLabel),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  reliabilityLabel,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpacing.xl),
               OutlinedButton.icon(
                 onPressed: _isRecomputing ? null : _recompute,
                 icon: _isRecomputing
@@ -168,7 +205,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.refresh),
+                    : const Icon(Icons.refresh_rounded),
                 label: const Text('Recompute from recent activity'),
               ),
             ],
@@ -187,44 +224,70 @@ class _HomeOfficeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Looks like your commute is:',
-              style: Theme.of(context).textTheme.titleSmall,
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Looks like your commute is:', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: AppSpacing.sm),
+          if (homeOffice.homeStation != null)
+            _StationLine(icon: Icons.home_rounded, label: 'Home', value: homeOffice.homeStation!),
+          if (homeOffice.officeStation != null) ...[
+            const SizedBox(height: 6),
+            _StationLine(
+              icon: Icons.work_rounded,
+              label: 'Office',
+              value: homeOffice.officeStation!,
             ),
-            const SizedBox(height: 8),
-            if (homeOffice.homeStation != null)
-              Text('Home station: ${homeOffice.homeStation}'),
-            if (homeOffice.officeStation != null)
-              Text('Office station: ${homeOffice.officeStation}'),
-            const SizedBox(height: 12),
-            if (homeOffice.confirmed)
-              Row(
-                children: const [
-                  Icon(Icons.check_circle, size: 16, color: Colors.green),
-                  SizedBox(width: 4),
-                  Text('Confirmed'),
-                ],
-              )
-            else
-              FilledButton(
-                onPressed: onConfirm,
-                child: const Text('Yes, that\'s right'),
-              ),
           ],
-        ),
+          const SizedBox(height: AppSpacing.md),
+          if (homeOffice.confirmed)
+            const Row(
+              children: [
+                Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success),
+                SizedBox(width: 6),
+                Text(
+                  'Confirmed',
+                  style: TextStyle(color: AppColors.success, fontWeight: FontWeight.w600),
+                ),
+              ],
+            )
+          else
+            FilledButton(
+              onPressed: onConfirm,
+              child: const Text('Yes, that\'s right'),
+            ),
+        ],
       ),
     );
   }
 }
 
-class _PreferenceTile extends StatelessWidget {
-  const _PreferenceTile({
+class _StationLine extends StatelessWidget {
+  const _StationLine({required this.icon, required this.label, required this.value});
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppColors.textTertiary),
+        const SizedBox(width: AppSpacing.sm),
+        Text('$label: ', style: Theme.of(context).textTheme.bodyMedium),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ],
+    );
+  }
+}
+
+class _PreferenceRow extends StatelessWidget {
+  const _PreferenceRow({
     required this.icon,
     required this.title,
     required this.value,
@@ -236,13 +299,18 @@ class _PreferenceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      trailing: Text(
-        value,
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.textSecondary),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.bodyLarge),
+        ),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.accent),
+        ),
+      ],
     );
   }
 }
