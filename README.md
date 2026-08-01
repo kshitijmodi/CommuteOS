@@ -56,9 +56,11 @@ copy .env.example .env    # then edit DATABASE_URL/SECRET_KEY as needed
 .venv\Scripts\python -m uvicorn app.main:app --port 8001 --reload
 ```
 
-Runs on **port 8001**, not FastAPI's usual 8000 default — this dev environment already has an unrelated project on 8000. Requires a local PostgreSQL instance with a `commuteos`/`commuteos` user and database (`CREATE USER commuteos WITH PASSWORD 'commuteos'; CREATE DATABASE commuteos OWNER commuteos;`), matching `DATABASE_URL` in `.env.example`.
+Runs on **port 8001**, not FastAPI's usual 8000 default — this dev environment already has an unrelated project on 8000. Requires a local PostgreSQL instance with a `commuteos`/`commuteos` user and database (`CREATE USER commuteos WITH PASSWORD 'commuteos'; CREATE DATABASE commuteos OWNER commuteos;`), matching `DATABASE_URL` in `.env.example`. This is only needed for *local* backend development — the app itself now talks to a real hosted backend by default (see below), not localhost.
 
-To reach this from a physical Android phone during development (the app's `apiBaseUrl` in `lib/account/api_config.dart` points at `localhost:8001`): plug the phone in via USB and run `adb reverse tcp:8001 tcp:8001` once per session before testing signup/login/trip logging — browsing and favorites work fine without this, since they never call the backend.
+### Hosted backend
+
+The backend is deployed on **Render's free tier** (`backend/render.yaml`: build/start commands, health check at `/health`, migrations run automatically via `alembic upgrade head` on every deploy), backed by a free **Neon** Postgres instance. The app's `apiBaseUrl` (`lib/account/api_config.dart`) points at the hosted URL — no more USB/`adb reverse` tunnel or "backend only runs on my laptop" requirement. Free-tier tradeoff: the Render service spins down after ~15 minutes of no traffic, so the first request after a while takes a few extra seconds to wake it back up — expected, not a bug. Env vars (`DATABASE_URL`, `SECRET_KEY`, `GROQ_API_KEY`, etc.) are set directly in Render's dashboard, never committed.
 
 ## Tech stack (per PRD)
 
