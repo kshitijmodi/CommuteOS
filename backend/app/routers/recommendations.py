@@ -10,7 +10,7 @@ from ..core.deps import get_current_user
 from ..decision_engine import RouteCandidate, rank_routes
 from ..llm_phrasing import phrase_recommendation
 from ..models import Preference, Trip, User
-from ..transit import mta, path
+from ..transit import mta, njt_bus, njt_rail, path
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
@@ -21,12 +21,15 @@ class CandidateRequest(BaseModel):
     doesn't discover routes itself, see decision_engine.py's docstring.
     """
 
-    agency: Literal["mta", "path"]
+    agency: Literal["mta", "path", "njt_rail", "njt_bus"]
     label: str
     # MTA: GTFS stop_id (e.g. "R20N") + route_id (e.g. "N").
     # PATH: station code (e.g. "JSQ") + direction ("ToNY"/"ToNJ").
+    # NJT rail/bus: station/stop_id + route_or_direction unused (both
+    # return every line at the stop in one call; there's no separate
+    # direction/route filter the way MTA/PATH need).
     stop_or_station: str
-    route_or_direction: str
+    route_or_direction: str = ""
 
 
 class RecommendationRequest(BaseModel):
@@ -61,10 +64,14 @@ async def get_recommendation(
             result = await mta.get_arrivals(
                 candidate.stop_or_station, candidate.route_or_direction
             )
-        else:
+        elif candidate.agency == "path":
             result = await path.get_arrivals(
                 candidate.stop_or_station, candidate.route_or_direction
             )
+        elif candidate.agency == "njt_rail":
+            result = await njt_rail.get_arrivals(candidate.stop_or_station)
+        else:
+            result = await njt_bus.get_arrivals(candidate.stop_or_station)
         route_candidates.append(
             RouteCandidate(
                 mode=candidate.agency, label=candidate.label, arrivals=result

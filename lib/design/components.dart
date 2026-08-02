@@ -10,11 +10,15 @@ import 'theme.dart';
 Color agencyColor(Agency agency) => switch (agency) {
   Agency.mta => const Color(0xFF5B8DEF),
   Agency.path => const Color(0xFFE8794D),
+  Agency.njtRail => const Color(0xFF9B5DE0),
+  Agency.njtBus => const Color(0xFF5DBE8A),
 };
 
 String agencyLabel(Agency agency) => switch (agency) {
   Agency.mta => 'MTA',
   Agency.path => 'PATH',
+  Agency.njtRail => 'NJT',
+  Agency.njtBus => 'NJT Bus',
 };
 
 /// Formats an arrival's absolute time as 12-hour clock time, e.g. "5:24 PM".
@@ -51,11 +55,35 @@ const Map<String, Color> _mtaRouteColors = {
   'SI': Color(0xFF0039A6),
 };
 
+/// NJ Transit's own published rail line colors (from their static GTFS
+/// feed's routes.txt route_color field - see
+/// backend/scripts/build_njt_rail_stations.py), keyed by route_short_name.
+/// NJT's real-time API reports a train's line as a LINECODE (e.g. "NE")
+/// that matches route_short_name in some cases but not others (e.g. the
+/// live feed's "AM"/Amtrak trains aren't in NJT's own GTFS at all, since
+/// they're a different agency sharing NJT's tracks/stations) - falls back
+/// to the agency color for anything unrecognized, same pattern as MTA.
+const Map<String, Color> _njtRailLineColors = {
+  'ACRL': Color(0xFF075AAA),
+  'MNBTN': Color(0xFFE66859),
+  'BERG': Color(0xFFFFD411),
+  'MAIN': Color(0xFFFFD411),
+  'MNE': Color(0xFF08A652),
+  'MNEG': Color(0xFFA4C9AA),
+  'NEC': Color(0xFFDD3439),
+  'NJCL': Color(0xFF03A3DF),
+  'PASC': Color(0xFF94219A),
+  'PRIN': Color(0xFFE87725),
+  'RARV': Color(0xFFF2A537),
+  'MRL': Color(0xFFC1AA72),
+};
+
 /// A route's real display color: NYCT's published color for an MTA route
-/// ID, or the feed-provided hex color(s) for a PATH arrival. Falls back to
-/// the agency's generic badge color if no real color is known (e.g. an
-/// MTA route ID this table doesn't recognize yet, or a PATH arrival
-/// missing/malformed lineColor data).
+/// ID, the feed-provided hex color(s) for a PATH arrival, or NJT's
+/// published rail line color. Falls back to the agency's generic badge
+/// color if no real color is known (e.g. an unrecognized MTA route ID, a
+/// PATH arrival missing/malformed lineColor data, or an NJT LINECODE this
+/// table doesn't have - like Amtrak trains sharing NJT's tracks).
 Color routeColor({
   required Agency agency,
   required String routeLabel,
@@ -64,6 +92,9 @@ Color routeColor({
   if (agency == Agency.path && routeColors.isNotEmpty) {
     final hex = routeColors.first;
     return Color(int.parse('FF$hex', radix: 16));
+  }
+  if (agency == Agency.njtRail) {
+    return _njtRailLineColors[routeLabel] ?? agencyColor(agency);
   }
   return _mtaRouteColors[routeLabel] ?? agencyColor(agency);
 }

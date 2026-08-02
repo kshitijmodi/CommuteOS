@@ -29,11 +29,29 @@ def mock_transit_fetchers(monkeypatch):
             is_live=True,
         )
 
+    async def fake_njt_rail_arrivals(station_code):
+        return ArrivalsResult(
+            arrivals=[Arrival(route_label="NEC", arrival_time=now + timedelta(minutes=20))],
+            is_live=True,
+        )
+
+    async def fake_njt_bus_arrivals(stop_id):
+        return ArrivalsResult(
+            arrivals=[Arrival(route_label="163", arrival_time=now + timedelta(minutes=25))],
+            is_live=True,
+        )
+
     monkeypatch.setattr(
         "app.routers.recommendations.mta.get_arrivals", fake_mta_arrivals
     )
     monkeypatch.setattr(
         "app.routers.recommendations.path.get_arrivals", fake_path_arrivals
+    )
+    monkeypatch.setattr(
+        "app.routers.recommendations.njt_bus.get_arrivals", fake_njt_bus_arrivals
+    )
+    monkeypatch.setattr(
+        "app.routers.recommendations.njt_rail.get_arrivals", fake_njt_rail_arrivals
     )
 
 
@@ -84,6 +102,52 @@ def test_recommendation_picks_soonest_candidate(client):
     assert body["confidence"] == 0.9
     assert len(body["message"]) > 0
     assert body["trip_id"]
+
+
+def test_recommendation_supports_njt_rail_candidate(client):
+    token = _signup_and_login(client, email="njt@example.com")
+
+    response = client.post(
+        "/recommendations",
+        json={
+            "candidates": [
+                {
+                    "agency": "njt_rail",
+                    "label": "NJT from Newark Penn",
+                    "stop_or_station": "NP",
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "njt_rail"
+    assert body["label"] == "NJT from Newark Penn"
+
+
+def test_recommendation_supports_njt_bus_candidate(client):
+    token = _signup_and_login(client, email="njtbus@example.com")
+
+    response = client.post(
+        "/recommendations",
+        json={
+            "candidates": [
+                {
+                    "agency": "njt_bus",
+                    "label": "163 bus",
+                    "stop_or_station": "1941",
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "njt_bus"
+    assert body["label"] == "163 bus"
 
 
 def test_recommendation_logs_a_trip(client, db_session):

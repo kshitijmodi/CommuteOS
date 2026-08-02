@@ -6,6 +6,7 @@ from .routers import (
     home_office,
     preferences,
     recommendations,
+    transit,
     trip_outcomes,
     trips,
     users,
@@ -29,6 +30,7 @@ app.include_router(preferences.router)
 app.include_router(recommendations.router)
 app.include_router(trip_outcomes.router)
 app.include_router(home_office.router)
+app.include_router(transit.router)
 
 
 @app.get("/health")

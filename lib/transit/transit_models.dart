@@ -5,7 +5,7 @@
 /// PATH station codes, feed lookup tables) stay inside that agency's module.
 library;
 
-enum Agency { mta, path }
+enum Agency { mta, path, njtRail, njtBus }
 
 /// A physical station, agency-agnostic. Implemented by MtaStation and
 /// PathStation.

@@ -51,10 +51,23 @@ class RecommendationCandidate {
 
   /// MTA: a route ID from station.routes (e.g. "N").
   /// PATH: a direction key from station.directions (e.g. "ToNY").
+  /// NJT rail: unused, always "" - one API call returns every line.
   final String routeOrDirection;
 
+  /// Dart's Agency.name is camelCase (e.g. "njtRail"), but the backend's
+  /// CandidateRequest.agency is a snake_case Literal ("njt_rail") matching
+  /// its Python module names - an explicit mapping here, not station.agency
+  /// .name directly, since the two naming conventions don't line up and a
+  /// silent mismatch would fail as an unhandled 422 from the backend.
+  static const _agencyWireNames = {
+    Agency.mta: 'mta',
+    Agency.path: 'path',
+    Agency.njtRail: 'njt_rail',
+    Agency.njtBus: 'njt_bus',
+  };
+
   Map<String, dynamic> toJson() => {
-    'agency': station.agency.name,
+    'agency': _agencyWireNames[station.agency],
     'label': station.name,
     'stop_or_station': station.id,
     'route_or_direction': routeOrDirection,

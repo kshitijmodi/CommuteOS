@@ -37,5 +37,13 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+# Bundled trip_id -> route lookup for NJT bus real-time data (see
+# app/transit/njt_bus.py) - must ship with the installed package, not just
+# exist in the source tree, since Render's deploy does a real (if
+# editable) pip install rather than running from a checked-out repo dir
+# in the way local dev implicitly does.
+"app.data" = ["*.csv"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

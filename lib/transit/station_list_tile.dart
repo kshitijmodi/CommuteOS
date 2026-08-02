@@ -53,9 +53,9 @@ class StationListTile extends StatelessWidget {
         : '${group.stations.length} stations';
 
     // One RouteChip per distinct (agency, route) pair, in a stable order,
-    // e.g. real MTA line colors for each route ID plus a single PATH chip
-    // rather than repeating "PATH" per line (PATH's routes list is agency-
-    // level only, not per-line - see PathStation.routes).
+    // e.g. real MTA/NJT line colors for each route ID plus a single PATH
+    // chip rather than repeating "PATH" per line (PATH's routes list is
+    // agency-level only, not per-line - see PathStation.routes).
     final seen = <String>{};
     final chips = <Widget>[];
     for (final station in group.stations) {
@@ -66,8 +66,8 @@ class StationListTile extends StatelessWidget {
         continue;
       }
       for (final route in station.routes) {
-        if (seen.add('mta:$route')) {
-          chips.add(RouteChip(agency: Agency.mta, label: route));
+        if (seen.add('${station.agency}:$route')) {
+          chips.add(RouteChip(agency: station.agency, label: route));
         }
       }
     }

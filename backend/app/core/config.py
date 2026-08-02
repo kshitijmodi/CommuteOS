@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     groq_model: str = "llama-3.1-8b-instant"
 
-    # NJ Transit developer account - pending approval, see
-    # app/transit/njt.py and OPEN_QUESTIONS.md. Unused until implemented.
+    # NJ Transit developer account - approved 2026-08-01, see
+    # app/transit/njt_rail.py and OPEN_QUESTIONS.md.
     njt_username: str | None = None
     njt_password: str | None = None
 

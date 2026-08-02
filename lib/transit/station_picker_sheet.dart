@@ -63,7 +63,7 @@ Future<TransitStation?> showStationPicker(
                                         ? [RouteChip(agency: Agency.path, label: 'PATH')]
                                         : [
                                             for (final route in station.routes)
-                                              RouteChip(agency: Agency.mta, label: route),
+                                              RouteChip(agency: station.agency, label: route),
                                           ],
                                   ),
                                   const SizedBox(height: 6),

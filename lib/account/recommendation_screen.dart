@@ -4,6 +4,8 @@ import '../design/components.dart';
 import '../design/theme.dart';
 import '../favorites/favorites_repository.dart';
 import '../mta/mta_station.dart';
+import '../njt/njt_bus_stop.dart';
+import '../njt/njt_rail_station.dart';
 import '../path/path_station.dart';
 import '../transit/station_directory.dart';
 import '../transit/transit_models.dart';
@@ -47,7 +49,8 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
 
   /// A single default route/direction per station for this first version -
   /// see the class doc for why this doesn't yet let the user pick among a
-  /// station's multiple routes.
+  /// station's multiple routes. NJT rail/bus have no route/direction to
+  /// pick - one call returns every line at the stop - so it's always "".
   String? _defaultRouteOrDirection(TransitStation station) {
     if (station is MtaStation) {
       return station.routes.isNotEmpty ? station.routes.first : null;
@@ -56,6 +59,9 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
       return station.directions.isNotEmpty
           ? station.directions.first.key
           : null;
+    }
+    if (station is NjtRailStation || station is NjtBusStop) {
+      return '';
     }
     return null;
   }
@@ -183,7 +189,7 @@ class _SelectableStationRow extends StatelessWidget {
         ? [RouteChip(agency: Agency.path, label: 'PATH')]
         : [
             for (final route in station.routes)
-              RouteChip(agency: Agency.mta, label: route),
+              RouteChip(agency: station.agency, label: route),
           ];
 
     return Padding(

@@ -6,6 +6,8 @@ import '../account/trip_logger.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
 import '../mta/mta_service.dart';
+import '../njt/njt_bus_service.dart';
+import '../njt/njt_rail_service.dart';
 import '../path/path_service.dart';
 import 'transit_models.dart';
 
@@ -30,6 +32,8 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   late final TransitService _service = switch (widget.station.agency) {
     Agency.mta => MtaService(),
     Agency.path => PathService(),
+    Agency.njtRail => NjtRailService(),
+    Agency.njtBus => NjtBusService(),
   };
   final _tripLogger = TripLogger();
   Timer? _timer;
