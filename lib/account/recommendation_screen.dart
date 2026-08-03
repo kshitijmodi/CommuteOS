@@ -11,12 +11,14 @@ import '../transit/station_directory.dart';
 import '../transit/transit_models.dart';
 import 'recommendation_repository.dart';
 
-/// Phase 3: pick two or more favorited stations to compare, and get a
-/// single recommendation for which to take right now. This is a narrow
-/// first version of the PRD's recommendation flow - it compares whatever
-/// favorites the user selects, rather than automatically knowing "your
-/// usual commute options," since the app doesn't yet infer that (see
-/// OPEN_QUESTIONS.md on home/office inference being unbuilt).
+/// Phase 3: get a single recommendation for which route to take right now.
+/// Defaults to auto-discovery from the user's confirmed home/office
+/// stations (GET /recommendations/from-home-office) - no setup needed once
+/// home/office is confirmed (see the preferences screen). Falls back to
+/// manually picking two or more favorited stations to compare when
+/// auto-discovery isn't available yet (home/office unconfirmed, or not yet
+/// resolvable to a real candidate route - see
+/// recommendation_builder.specs_from_home_office on the backend).
 class RecommendationScreen extends StatefulWidget {
   const RecommendationScreen({super.key});
 
@@ -24,10 +26,15 @@ class RecommendationScreen extends StatefulWidget {
   State<RecommendationScreen> createState() => _RecommendationScreenState();
 }
 
+enum _Mode { loadingAuto, auto, manual }
+
 class _RecommendationScreenState extends State<RecommendationScreen> {
   final _stationDirectory = StationDirectory();
   final _favoritesRepository = FavoritesRepository();
   final _recommendationRepository = RecommendationRepository();
+
+  _Mode _mode = _Mode.loadingAuto;
+  Future<Recommendation>? _autoRecommendationFuture;
 
   late Future<List<TransitStation>> _favoritesFuture;
   final _selected = <TransitStation>{};
@@ -37,6 +44,22 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
   void initState() {
     super.initState();
     _favoritesFuture = _loadFavoriteStations();
+    _tryAutoDiscovery();
+  }
+
+  Future<void> _tryAutoDiscovery() async {
+    final future = _recommendationRepository.getRecommendationFromHomeOffice();
+    final result = await future.catchError((_) => null);
+
+    if (!mounted) return;
+    if (result == null) {
+      setState(() => _mode = _Mode.manual);
+    } else {
+      setState(() {
+        _mode = _Mode.auto;
+        _autoRecommendationFuture = Future.value(result);
+      });
+    }
   }
 
   Future<List<TransitStation>> _loadFavoriteStations() async {
@@ -90,7 +113,44 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('What should I take?')),
-      body: FutureBuilder<List<TransitStation>>(
+      body: switch (_mode) {
+        _Mode.loadingAuto => const AppLoader(),
+        _Mode.auto => _buildAuto(context),
+        _Mode.manual => _buildManual(context),
+      },
+    );
+  }
+
+  Widget _buildAuto(BuildContext context) {
+    return Column(
+      children: [
+        const SectionHeader('Your usual commute'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: Text(
+            'Based on your confirmed home and office stations.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: _RecommendationResult(future: _autoRecommendationFuture!),
+        ),
+        const Spacer(),
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: TextButton(
+            onPressed: () => setState(() => _mode = _Mode.manual),
+            child: const Text('Compare different stations instead'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildManual(BuildContext context) {
+    return FutureBuilder<List<TransitStation>>(
         future: _favoritesFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -167,7 +227,6 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
             ],
           );
         },
-      ),
     );
   }
 }

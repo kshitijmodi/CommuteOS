@@ -4,13 +4,11 @@ reminder (see lib/account/commute_notification_service.dart), this runs
 the real decision engine + LLM phrasing against a user's inferred home/
 office station and pushes an actual recommendation.
 
-Run manually for now (`python -m app.jobs.send_commute_notifications`);
-wiring this to a real schedule (so it runs automatically near each user's
-usual departure time, not on a developer's command) is a deployment
-concern tracked in OPEN_QUESTIONS.md, same as the nightly preference job.
-Currently runs once for every eligible user regardless of local time of
-day - a real scheduled version would need per-user timezone/departure-
-time awareness to avoid notifying at 3am.
+Can be run manually (`python -m app.jobs.send_commute_notifications`) or,
+in production, is triggered once daily via POST /internal/run-commute-job
+(see routers/internal.py) by a scheduled GitHub Actions workflow. Runs
+once for every eligible user at one fixed time (7:45 AM ET) regardless of
+each user's actual typical departure time - see OPEN_QUESTIONS.md.
 
 Eligibility: a user must have (a) a confirmed home/office inference (per
 the PRD's "confirmed once via a prompt" step - an unconfirmed inference
@@ -27,25 +25,7 @@ from sqlalchemy.orm import Session
 from ..core.database import SessionLocal
 from ..models import User
 from ..notify_service import PushSendException, send_push
-from ..recommendation_builder import CandidateSpec, build_recommendation
-
-
-def _candidate_spec_for(
-    station: str | None, mode: str | None, route_or_direction: str | None
-) -> CandidateSpec | None:
-    if station is None or mode is None:
-        return None
-    if mode in ("mta", "path") and not route_or_direction:
-        # Known station, but no route/direction ever captured for it (see
-        # the module docstring) - can't call MTA/PATH's get_arrivals
-        # without one, so this user can't be auto-recommended yet.
-        return None
-    return CandidateSpec(
-        agency=mode,
-        label=station,
-        stop_or_station=station,
-        route_or_direction=route_or_direction or "",
-    )
+from ..recommendation_builder import build_recommendation, specs_from_home_office
 
 
 async def send_notification_for_user(db: Session, user: User) -> bool:
@@ -55,19 +35,10 @@ async def send_notification_for_user(db: Session, user: User) -> bool:
     rejecting the send (e.g. a stale/invalid token) - one user's bad token
     shouldn't stop the batch from notifying everyone else.
     """
-    if not user.home_office_confirmed or not user.fcm_token:
+    if not user.fcm_token:
         return False
 
-    specs = [
-        spec
-        for spec in (
-            _candidate_spec_for(user.home_station, user.home_mode, user.home_route_or_direction),
-            _candidate_spec_for(
-                user.office_station, user.office_mode, user.office_route_or_direction
-            ),
-        )
-        if spec is not None
-    ]
+    specs = specs_from_home_office(user)
     if not specs:
         return False
 

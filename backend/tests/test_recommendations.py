@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.models import User
 from app.transit.models import Arrival, ArrivalsResult
 
 
@@ -11,6 +12,13 @@ def _signup_and_login(client, email="rec@example.com", password="hunter22"):
         "/auth/login", data={"username": email, "password": password}
     )
     return login.json()["access_token"]
+
+
+def _set_home_office(db_session, email, **kwargs):
+    user = db_session.query(User).filter(User.email == email).one()
+    for key, value in kwargs.items():
+        setattr(user, key, value)
+    db_session.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -174,3 +182,98 @@ def test_recommendation_logs_a_trip(client, db_session):
     assert len(trips) == 1
     assert trips[0].mode == "mta"
     assert trips[0].predicted_arrival is not None
+
+
+def test_from_home_office_requires_auth(client):
+    response = client.get("/recommendations/from-home-office")
+    assert response.status_code == 401
+
+
+def test_from_home_office_404s_when_not_confirmed(client, db_session):
+    email = "unconfirmed@example.com"
+    token = _signup_and_login(client, email=email)
+    _set_home_office(
+        db_session,
+        email,
+        home_station="NP",
+        home_mode="njt_rail",
+        home_office_confirmed=False,
+    )
+
+    response = client.get(
+        "/recommendations/from-home-office",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_from_home_office_404s_when_mta_route_never_captured(client, db_session):
+    email = "norouteyet@example.com"
+    token = _signup_and_login(client, email=email)
+    _set_home_office(
+        db_session,
+        email,
+        home_station="R20N",
+        home_mode="mta",
+        home_route_or_direction=None,
+        home_office_confirmed=True,
+    )
+
+    response = client.get(
+        "/recommendations/from-home-office",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_from_home_office_picks_soonest_of_home_and_office(client, db_session):
+    email = "homeoffice@example.com"
+    token = _signup_and_login(client, email=email)
+    _set_home_office(
+        db_session,
+        email,
+        home_station="R20N",
+        home_mode="mta",
+        home_route_or_direction="N",
+        office_station="JSQ",
+        office_mode="path",
+        office_route_or_direction="ToNY",
+        home_office_confirmed=True,
+    )
+
+    response = client.get(
+        "/recommendations/from-home-office",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    # MTA (home) arrives at +10min, PATH (office) at +15min in the mock.
+    assert body["mode"] == "mta"
+    assert body["label"] == "R20N"
+    assert body["trip_id"]
+
+
+def test_from_home_office_logs_a_trip(client, db_session):
+    from app.models import Trip
+
+    email = "homeofficetrip@example.com"
+    token = _signup_and_login(client, email=email)
+    _set_home_office(
+        db_session,
+        email,
+        home_station="NP",
+        home_mode="njt_rail",
+        home_office_confirmed=True,
+    )
+
+    client.get(
+        "/recommendations/from-home-office",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    trips = db_session.query(Trip).all()
+    assert len(trips) == 1
+    assert trips[0].mode == "njt_rail"

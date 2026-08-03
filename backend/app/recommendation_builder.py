@@ -30,6 +30,46 @@ class CandidateSpec:
     route_or_direction: str = ""
 
 
+def _candidate_spec_for(
+    station: str | None, mode: str | None, route_or_direction: str | None
+) -> CandidateSpec | None:
+    if station is None or mode is None:
+        return None
+    if mode in ("mta", "path") and not route_or_direction:
+        # Known station, but no route/direction ever captured for it (see
+        # User.home_route_or_direction's docstring) - can't call MTA/PATH's
+        # get_arrivals without one, so this station can't be auto-derived yet.
+        return None
+    return CandidateSpec(
+        agency=mode,
+        label=station,
+        stop_or_station=station,
+        route_or_direction=route_or_direction or "",
+    )
+
+
+def specs_from_home_office(user: User) -> list[CandidateSpec]:
+    """Builds candidates from a user's confirmed home/office inference -
+    shared by the scheduled notification job and the on-demand
+    /recommendations/from-home-office endpoint, so "what counts as a usable
+    home/office candidate" can't drift between the two. Returns an empty
+    list (not an error) if home/office isn't confirmed or neither station
+    resolves to a usable candidate - callers decide how to respond to that.
+    """
+    if not user.home_office_confirmed:
+        return []
+    return [
+        spec
+        for spec in (
+            _candidate_spec_for(user.home_station, user.home_mode, user.home_route_or_direction),
+            _candidate_spec_for(
+                user.office_station, user.office_mode, user.office_route_or_direction
+            ),
+        )
+        if spec is not None
+    ]
+
+
 async def fetch_candidates(specs: list[CandidateSpec]) -> list[RouteCandidate]:
     """Fetches live arrivals for each spec and returns them as scoreable
     RouteCandidates. A spec whose agency's fetch fails or returns no

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import get_current_user
 from ..models import User
-from ..recommendation_builder import CandidateSpec, build_recommendation
+from ..recommendation_builder import CandidateSpec, build_recommendation, specs_from_home_office
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
@@ -71,6 +71,50 @@ async def get_recommendation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No live arrivals found for any candidate route",
+        )
+
+    best, message, trip = outcome
+    db.commit()
+    db.refresh(trip)
+
+    return RecommendationResponse(
+        mode=best.mode,
+        label=best.label,
+        predicted_arrival=best.predicted_arrival,
+        confidence=best.confidence,
+        is_live=best.is_live,
+        message=message,
+        trip_id=str(trip.id),
+    )
+
+
+@router.get("/from-home-office", response_model=RecommendationResponse)
+async def get_recommendation_from_home_office(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Same engine as POST /recommendations, but with candidates derived
+    automatically from the user's confirmed home/office inference instead
+    of the client passing them explicitly - reuses exactly the same
+    eligibility rule the scheduled notification job uses (see
+    recommendation_builder.specs_from_home_office), so "who counts as
+    ready for auto-recommendations" can't drift between the two. 404s
+    (rather than returning an empty/default result) when the user isn't
+    eligible yet, so the client can fall back to manual favorite-picking.
+    """
+    specs = specs_from_home_office(current_user)
+    if not specs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Home/office isn't confirmed yet, or isn't resolvable to a candidate route",
+        )
+
+    outcome = await build_recommendation(db, current_user, specs)
+
+    if outcome is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No live arrivals found for your home/office stations",
         )
 
     best, message, trip = outcome

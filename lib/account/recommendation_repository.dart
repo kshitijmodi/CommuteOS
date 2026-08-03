@@ -112,6 +112,40 @@ class RecommendationRepository {
     );
   }
 
+  /// Tries to get a recommendation from the user's confirmed home/office
+  /// stations, with no manual station-picking - see backend's
+  /// GET /recommendations/from-home-office. Returns null (not an error)
+  /// when the backend 404s, which just means home/office isn't confirmed
+  /// yet or isn't resolvable to a real candidate (see
+  /// recommendation_builder.specs_from_home_office on the backend) - the
+  /// caller falls back to manual favorite-picking in that case, same as if
+  /// this feature didn't exist.
+  Future<Recommendation?> getRecommendationFromHomeOffice() async {
+    final token = await _authRepository.getToken();
+    if (token == null) {
+      throw RecommendationException('Log in to get recommendations.');
+    }
+
+    final response = await _client.get(
+      Uri.parse('$apiBaseUrl/recommendations/from-home-office'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 404) {
+      return null;
+    }
+
+    if (response.statusCode != 200) {
+      throw RecommendationException(
+        _extractErrorDetail(response, 'Could not get a recommendation'),
+      );
+    }
+
+    return Recommendation.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   String _extractErrorDetail(http.Response response, String fallback) {
     try {
       final body = jsonDecode(response.body) as Map<String, dynamic>;
