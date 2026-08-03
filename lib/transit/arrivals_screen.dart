@@ -38,24 +38,37 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   final _tripLogger = TripLogger();
   Timer? _timer;
   Future<TransitArrivalsResult>? _future;
+  bool _hasLoggedTrip = false;
 
   @override
   void initState() {
     super.initState();
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
-    // Fire-and-forget: a no-op for logged-out users (the common case today
-    // - see OPEN_QUESTIONS.md on auth being opt-in, not required to browse).
-    _tripLogger.logStationView(
-      mode: widget.station.agency.name,
-      originStop: widget.station.id,
-    );
   }
 
   void _refresh() {
     setState(() {
-      _future = _service.getArrivals(widget.station);
+      _future = _service.getArrivals(widget.station)
+        ..then(_logTripOnce, onError: (_) {});
     });
+  }
+
+  /// Logs the trip once real arrivals data has actually loaded (not in
+  /// initState, before anything is known) - see
+  /// soonestRouteOrDirectionForTripLog's docs on why this is the only
+  /// point a real route_or_direction value can be captured. Fire-and-
+  /// forget: a no-op for logged-out users (the common case today - see
+  /// OPEN_QUESTIONS.md on auth being opt-in, not required to browse).
+  void _logTripOnce(TransitArrivalsResult result) {
+    if (_hasLoggedTrip) return;
+    _hasLoggedTrip = true;
+
+    _tripLogger.logStationView(
+      mode: wireAgencyName(widget.station.agency),
+      originStop: widget.station.id,
+      routeOrDirection: soonestRouteOrDirectionForTripLog(widget.station.agency, result),
+    );
   }
 
   @override
@@ -177,6 +190,51 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 
   Widget _messageList(IconData icon, String title, String message) {
     return EmptyState(icon: icon, title: title, message: message);
+  }
+}
+
+/// The route/direction of whichever arrival was soonest across every
+/// direction in [result] — a real, observed signal (not guessed) for
+/// "what this user was actually shown" when the arrivals screen loaded,
+/// logged as the trip's route_or_direction (see ArrivalsScreen) so it can
+/// be used later to re-fetch arrivals for this exact station (e.g. the
+/// commute notification job).
+///
+/// MTA needs a route ID here (its arrivals carry one per entry); PATH
+/// needs a direction key instead (its arrivals don't distinguish routes
+/// the same way) — see RecommendationCandidate's docs for the same split.
+/// NJT rail/bus need neither (a station code alone is enough to fetch
+/// arrivals there), so this returns null for both rather than logging a
+/// value nothing will ever use.
+String? soonestRouteOrDirectionForTripLog(Agency agency, TransitArrivalsResult result) {
+  switch (agency) {
+    case Agency.njtRail:
+    case Agency.njtBus:
+      return null;
+    case Agency.path:
+      String? soonestDirectionKey;
+      DateTime? soonestTime;
+      for (final entry in result.arrivalsByDirectionKey.entries) {
+        for (final arrival in entry.value) {
+          if (soonestTime == null || arrival.arrivalTime.isBefore(soonestTime)) {
+            soonestTime = arrival.arrivalTime;
+            soonestDirectionKey = entry.key;
+          }
+        }
+      }
+      return soonestDirectionKey;
+    case Agency.mta:
+      String? soonestRoute;
+      DateTime? soonestTime;
+      for (final arrivals in result.arrivalsByDirectionKey.values) {
+        for (final arrival in arrivals) {
+          if (soonestTime == null || arrival.arrivalTime.isBefore(soonestTime)) {
+            soonestTime = arrival.arrivalTime;
+            soonestRoute = arrival.routeLabel;
+          }
+        }
+      }
+      return soonestRoute;
   }
 }
 

@@ -3,9 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../design/components.dart';
 import '../design/theme.dart';
-import 'commute_notification_service.dart';
 import 'home_office_repository.dart';
 import 'preferences_repository.dart';
+import 'push_registration_service.dart';
 
 /// Phase 2 exit criteria per the PRD: "the app can state, in plain data,
 /// this user prefers reliability over speed, tolerates 0.3mi walks,
@@ -20,51 +20,47 @@ class PreferencesScreen extends StatefulWidget {
 }
 
 class _PreferencesScreenState extends State<PreferencesScreen> {
-  static const _reminderEnabledKey = 'commute_reminder_enabled';
+  static const _pushEnabledKey = 'commute_push_enabled';
 
   final _repository = PreferencesRepository();
   final _homeOfficeRepository = HomeOfficeRepository();
-  final _notificationService = CommuteNotificationService();
+  final _pushRegistrationService = PushRegistrationService();
   late Future<LearnedPreferences?> _preferencesFuture;
   late Future<HomeOffice?> _homeOfficeFuture;
   bool _isRecomputing = false;
-  bool _reminderEnabled = false;
+  bool _pushEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _preferencesFuture = _repository.getMyPreferences();
     _homeOfficeFuture = _homeOfficeRepository.getMyHomeOffice();
-    _notificationService.initialize();
-    _loadReminderState();
+    _loadPushState();
   }
 
-  Future<void> _loadReminderState() async {
+  Future<void> _loadPushState() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
-      setState(
-        () => _reminderEnabled = prefs.getBool(_reminderEnabledKey) ?? false,
-      );
+      setState(() => _pushEnabled = prefs.getBool(_pushEnabledKey) ?? false);
     }
   }
 
-  Future<void> _toggleReminder(bool enabled) async {
+  /// Registers (or just remembers "off" locally) for the real proactive
+  /// notification pipeline - a scheduled backend job that runs the
+  /// decision engine + LLM phrasing and pushes an actual recommendation,
+  /// replacing the earlier fixed-time local reminder. Push delivery
+  /// itself is currently stubbed (see PushRegistrationService) pending a
+  /// real Firebase project; this toggle exercises the whole registration
+  /// pipeline regardless.
+  Future<void> _togglePush(bool enabled) async {
     if (enabled) {
-      final granted = await _notificationService.requestPermission();
-      if (!granted) return; // user declined - leave the toggle off
-      await _notificationService.scheduleDailyReminder(
-        hour: 7,
-        minute: 45,
-        title: 'Time to check your commute',
-        body: 'Open CommuteOS to see what to take today.',
-      );
-    } else {
-      await _notificationService.cancelDailyReminder();
+      final registered = await _pushRegistrationService.register();
+      if (!registered) return; // not logged in / backend rejected - leave off
     }
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_reminderEnabledKey, enabled);
-    setState(() => _reminderEnabled = enabled);
+    await prefs.setBool(_pushEnabledKey, enabled);
+    setState(() => _pushEnabled = enabled);
   }
 
   Future<void> _recompute() async {
@@ -146,20 +142,21 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'Daily commute reminder',
+                                      'Smart commute notifications',
                                       style: Theme.of(context).textTheme.bodyLarge,
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      'A local notification each morning at 7:45 AM.',
+                                      'A real, live recommendation for your commute '
+                                      '- not just a reminder to check.',
                                       style: Theme.of(context).textTheme.bodySmall,
                                     ),
                                   ],
                                 ),
                               ),
                               Switch(
-                                value: _reminderEnabled,
-                                onChanged: _toggleReminder,
+                                value: _pushEnabled,
+                                onChanged: _togglePush,
                               ),
                             ],
                           ),

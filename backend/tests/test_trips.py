@@ -56,6 +56,24 @@ def test_create_trip_with_destination(client):
     assert response.json()["dest_stop"] == "WTC"
 
 
+def test_create_trip_with_route_or_direction(client):
+    token = _signup_and_login(client, email="routedir@example.com")
+
+    response = client.post(
+        "/trips",
+        json={
+            "start_time": "2026-07-29T08:15:00Z",
+            "mode": "mta",
+            "origin_stop": "R20N",
+            "route_or_direction": "N",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["route_or_direction"] == "N"
+
+
 def test_created_trip_is_attributed_to_the_authenticated_user(client, db_session):
     from app.models import Trip, User
 

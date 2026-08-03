@@ -27,6 +27,16 @@ class Trip(Base):
     mode: Mapped[str] = mapped_column(String)  # e.g. "mta", "path", "njt"
     origin_stop: Mapped[str] = mapped_column(String)
 
+    # The specific route/direction viewed, e.g. MTA route ID "N" or PATH
+    # direction "ToNY" - needed to actually re-fetch live arrivals for this
+    # exact station later (e.g. the commute notification job), since a
+    # bare origin_stop alone isn't enough for MTA/PATH's get_arrivals(),
+    # which both require a route_id/direction parameter (unlike NJT rail/
+    # bus, where a station code alone is sufficient). Nullable because
+    # historical trips logged before this column existed have no value to
+    # backfill it with - never guess one.
+    route_or_direction: Mapped[str | None] = mapped_column(String, nullable=True)
+
     # Nullable: the app currently only knows which station the user viewed,
     # not where they were headed - real destination capture needs a later
     # route-planning feature. Null here means "unknown", not "same as

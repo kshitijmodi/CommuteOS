@@ -7,6 +7,23 @@ library;
 
 enum Agency { mta, path, njtRail, njtBus }
 
+/// Dart's Agency.name is camelCase (e.g. "njtRail"), but the backend's
+/// mode/agency fields (Trip.mode, CandidateRequest.agency) are snake_case
+/// matching its Python module names ("njt_rail") - this is the single
+/// source of truth for that mapping, used anywhere an Agency crosses the
+/// wire to the backend. A silent mismatch here would either get stored as
+/// a slightly-wrong Trip.mode string, or fail request validation outright
+/// (CandidateRequest.agency is a strict Literal) - never use
+/// station.agency.name directly for anything the backend reads.
+const Map<Agency, String> _agencyWireNames = {
+  Agency.mta: 'mta',
+  Agency.path: 'path',
+  Agency.njtRail: 'njt_rail',
+  Agency.njtBus: 'njt_bus',
+};
+
+String wireAgencyName(Agency agency) => _agencyWireNames[agency]!;
+
 /// A physical station, agency-agnostic. Implemented by MtaStation and
 /// PathStation.
 abstract class TransitStation {

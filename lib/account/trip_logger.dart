@@ -18,12 +18,18 @@ class TripLogger {
   final AuthRepository _authRepository;
   final http.Client _client;
 
-  /// [mode] should match the station's agency (e.g. "mta", "path").
-  /// Failures are logged, not surfaced to the user - a missed trip log
-  /// entry shouldn't interrupt someone checking arrival times.
+  /// [mode] should be the backend's wire name for the station's agency
+  /// (see wireAgencyName in transit_models.dart, e.g. "njt_rail" - NOT
+  /// Agency.name directly, which is camelCase and doesn't match).
+  /// [routeOrDirection] is the specific route/direction actually shown
+  /// when arrivals loaded (see ArrivalsScreen), if the agency has one -
+  /// null for NJT rail/bus, which don't need one. Failures are logged, not
+  /// surfaced to the user - a missed trip log entry shouldn't interrupt
+  /// someone checking arrival times.
   Future<void> logStationView({
     required String mode,
     required String originStop,
+    String? routeOrDirection,
   }) async {
     final token = await _authRepository.getToken();
     if (token == null) return; // not logged in - nothing to log
@@ -39,6 +45,7 @@ class TripLogger {
           'start_time': DateTime.now().toUtc().toIso8601String(),
           'mode': mode,
           'origin_stop': originStop,
+          'route_or_direction': routeOrDirection,
         }),
       );
       if (response.statusCode != 201) {

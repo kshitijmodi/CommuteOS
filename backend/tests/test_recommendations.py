@@ -42,16 +42,16 @@ def mock_transit_fetchers(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "app.routers.recommendations.mta.get_arrivals", fake_mta_arrivals
+        "app.recommendation_builder.mta.get_arrivals", fake_mta_arrivals
     )
     monkeypatch.setattr(
-        "app.routers.recommendations.path.get_arrivals", fake_path_arrivals
+        "app.recommendation_builder.path.get_arrivals", fake_path_arrivals
     )
     monkeypatch.setattr(
-        "app.routers.recommendations.njt_bus.get_arrivals", fake_njt_bus_arrivals
+        "app.recommendation_builder.njt_bus.get_arrivals", fake_njt_bus_arrivals
     )
     monkeypatch.setattr(
-        "app.routers.recommendations.njt_rail.get_arrivals", fake_njt_rail_arrivals
+        "app.recommendation_builder.njt_rail.get_arrivals", fake_njt_rail_arrivals
     )
 
 

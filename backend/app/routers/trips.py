@@ -18,6 +18,10 @@ class TripCreate(BaseModel):
     # Optional: the app currently only knows which station the user
     # viewed, not their destination - see the Trip model's docstring.
     dest_stop: str | None = None
+    # Optional: MTA route ID / PATH direction viewed, if the agency needs
+    # one - see the Trip model's docstring on why this matters for
+    # re-fetching arrivals later.
+    route_or_direction: str | None = None
 
 
 class TripRead(BaseModel):
@@ -26,6 +30,7 @@ class TripRead(BaseModel):
     mode: str
     origin_stop: str
     dest_stop: str | None
+    route_or_direction: str | None
 
     model_config = {"from_attributes": True}
 
@@ -51,6 +56,7 @@ def create_trip(
         mode=payload.mode,
         origin_stop=payload.origin_stop,
         dest_stop=payload.dest_stop,
+        route_or_direction=payload.route_or_direction,
     )
     db.add(trip)
     db.commit()
@@ -61,4 +67,5 @@ def create_trip(
         mode=trip.mode,
         origin_stop=trip.origin_stop,
         dest_stop=trip.dest_stop,
+        route_or_direction=trip.route_or_direction,
     )

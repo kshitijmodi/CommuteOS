@@ -42,13 +42,9 @@ dependencies:
   # Parsing the bundled MTA static station list (assets/data/mta_stations.csv)
   csv: ^6.0.0
 
-  # Local on-device persistence for favorite stations (Phase 1: no backend)
+  # Local on-device persistence for favorite stations (Phase 1: no backend),
+  # and remembering the smart-notification toggle's on/off state locally.
   shared_preferences: ^2.5.3
-
-  # Proactive daily reminder notifications (Phase 3) - local-only for now,
-  # see OPEN_QUESTIONS.md on why not Firebase Cloud Messaging yet.
-  flutter_local_notifications: ^18.0.1
-  timezone: ^0.10.0
 
 dev_dependencies:
   flutter_test:

@@ -12,8 +12,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        // flutter_local_notifications requires this (uses java.time APIs
-        // under the hood on API levels below 26).
+        // Kept enabled even though flutter_local_notifications (which
+        // originally needed this) was removed - Firebase Cloud Messaging,
+        // the real push mechanism this is moving toward (see
+        // push_registration_service.dart), commonly needs it too.
         isCoreLibraryDesugaringEnabled = true
     }
 

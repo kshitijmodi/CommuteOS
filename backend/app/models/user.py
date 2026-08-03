@@ -35,6 +35,32 @@ class User(Base):
     office_station: Mapped[str | None] = mapped_column(String, nullable=True)
     home_office_confirmed: Mapped[bool] = mapped_column(default=False)
 
+    # Which agency each station code belongs to (e.g. "mta", "njt_rail") -
+    # a bare station code alone is ambiguous across agencies (MTA and NJT
+    # bus in particular can both use plain numeric-looking IDs), and the
+    # recommendation engine needs to know which live-arrivals API to call.
+    # Sourced from the same Trip.mode value the station code itself came
+    # from - see home_office_engine.py.
+    home_mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    office_mode: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # MTA route ID / PATH direction for the inferred station, when the
+    # agency needs one to fetch arrivals (NJT rail/bus don't - a station
+    # code alone is enough there). Null if the winning trips predate
+    # Trip.route_or_direction existing, or if the agency doesn't need one -
+    # a null here for an MTA/PATH station means "can't auto-recommend yet,"
+    # not "recommend with no route filter."
+    home_route_or_direction: Mapped[str | None] = mapped_column(String, nullable=True)
+    office_route_or_direction: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+
+    # Set by the mobile app once it registers for push notifications (see
+    # lib/account/push_registration.dart). Null until the user has opted
+    # into proactive notifications - the scheduled commute-notification job
+    # (jobs/send_commute_notifications.py) skips any user without one.
+    fcm_token: Mapped[str | None] = mapped_column(String, nullable=True)
+
     # "Arrive on time" (0.0) vs "arrive fastest" (1.0) - the one explicit
     # onboarding input the PRD calls out, since this tradeoff isn't reliably
     # observable from behavior alone. Defaults to neutral until set.

@@ -52,6 +52,32 @@ void main() {
     expect(capturedRequest!.body, contains('"origin_stop":"JSQ"'));
   });
 
+  test('includes route_or_direction when provided', () async {
+    final authRepository = AuthRepository(
+      client: MockClient(
+        (request) async => http.Response('{"access_token": "tok123"}', 200),
+      ),
+    );
+    await authRepository.login('me@example.com', 'hunter2');
+
+    http.Request? capturedRequest;
+    final logger = TripLogger(
+      authRepository: authRepository,
+      client: MockClient((request) async {
+        capturedRequest = request;
+        return http.Response('{}', 201);
+      }),
+    );
+
+    await logger.logStationView(
+      mode: 'mta',
+      originStop: 'R20N',
+      routeOrDirection: 'N',
+    );
+
+    expect(capturedRequest!.body, contains('"route_or_direction":"N"'));
+  });
+
   test('swallows network errors without throwing', () async {
     final authRepository = AuthRepository(
       client: MockClient(

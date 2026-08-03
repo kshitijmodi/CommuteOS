@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,10 +7,8 @@ from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.deps import get_current_user
-from ..decision_engine import RouteCandidate, rank_routes
-from ..llm_phrasing import phrase_recommendation
-from ..models import Preference, Trip, User
-from ..transit import mta, njt_bus, njt_rail, path
+from ..models import User
+from ..recommendation_builder import CandidateSpec, build_recommendation
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
@@ -58,53 +56,24 @@ async def get_recommendation(
             detail="At least one candidate route is required",
         )
 
-    route_candidates = []
-    for candidate in payload.candidates:
-        if candidate.agency == "mta":
-            result = await mta.get_arrivals(
-                candidate.stop_or_station, candidate.route_or_direction
-            )
-        elif candidate.agency == "path":
-            result = await path.get_arrivals(
-                candidate.stop_or_station, candidate.route_or_direction
-            )
-        elif candidate.agency == "njt_rail":
-            result = await njt_rail.get_arrivals(candidate.stop_or_station)
-        else:
-            result = await njt_bus.get_arrivals(candidate.stop_or_station)
-        route_candidates.append(
-            RouteCandidate(
-                mode=candidate.agency, label=candidate.label, arrivals=result
-            )
+    specs = [
+        CandidateSpec(
+            agency=c.agency,
+            label=c.label,
+            stop_or_station=c.stop_or_station,
+            route_or_direction=c.route_or_direction,
         )
+        for c in payload.candidates
+    ]
+    outcome = await build_recommendation(db, current_user, specs)
 
-    preference = db.get(Preference, current_user.id)
-    ranked = rank_routes(
-        route_candidates,
-        reliability_pref=current_user.reliability_pref,
-        now=datetime.now(timezone.utc),
-    )
-
-    if not ranked:
+    if outcome is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No live arrivals found for any candidate route",
         )
 
-    best = ranked[0]
-    message = phrase_recommendation(best)
-
-    # Log this recommendation as a trip so its accuracy can be checked
-    # later (was_recommendation_followed / actual_arrival, per the PRD's
-    # trust-preserving design) - origin_stop records which candidate won.
-    trip = Trip(
-        user_id=current_user.id,
-        start_time=datetime.now(timezone.utc),
-        mode=best.mode,
-        origin_stop=best.label,
-        predicted_arrival=best.predicted_arrival,
-    )
-    db.add(trip)
+    best, message, trip = outcome
     db.commit()
     db.refresh(trip)
 

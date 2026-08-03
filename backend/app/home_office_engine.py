@@ -30,27 +30,45 @@ _NOON_HOUR = 12
 
 
 def infer_home_and_office(db: Session, user_id) -> User:
-    """Updates home_station/office_station if enough data exists. Does NOT
-    touch home_office_confirmed - that's only set true by the user
-    explicitly confirming (see routers/home_office.py), per the PRD's
-    "confirmed once via a prompt" step. Re-running this after confirmation
-    still updates the underlying inference (so it can be re-confirmed
-    later if it changes), it just doesn't un-confirm anything by itself.
+    """Updates home_station/office_station (plus their _mode companions) if
+    enough data exists. Does NOT touch home_office_confirmed - that's only
+    set true by the user explicitly confirming (see routers/home_office.py),
+    per the PRD's "confirmed once via a prompt" step. Re-running this after
+    confirmation still updates the underlying inference (so it can be
+    re-confirmed later if it changes), it just doesn't un-confirm anything
+    by itself.
+
+    home_mode/office_mode record which agency (Trip.mode, e.g. "mta",
+    "njt_rail") the winning station code came from - a bare station code
+    is ambiguous across agencies (MTA and NJT bus in particular can both
+    use plain numeric-looking IDs), and anything that later wants to fetch
+    live arrivals for the inferred station (e.g. the commute notification
+    job) needs to know which API to call. home_route_or_direction/
+    office_route_or_direction similarly record the specific route/
+    direction viewed on the winning trip, if any - MTA/PATH need one to
+    fetch arrivals, NJT rail/bus don't (see the User model's docstring).
     """
     user = db.get(User, user_id)
     trips = db.scalars(select(Trip).where(Trip.user_id == user_id)).all()
 
-    morning_stops = Counter(
-        t.origin_stop for t in trips if t.start_time.hour < _NOON_HOUR
-    )
-    evening_stops = Counter(
-        t.origin_stop for t in trips if t.start_time.hour >= _NOON_HOUR
-    )
+    morning_trips = [t for t in trips if t.start_time.hour < _NOON_HOUR]
+    evening_trips = [t for t in trips if t.start_time.hour >= _NOON_HOUR]
+
+    morning_stops = Counter(t.origin_stop for t in morning_trips)
+    evening_stops = Counter(t.origin_stop for t in evening_trips)
 
     if sum(morning_stops.values()) >= _MIN_TRIPS_PER_SLOT:
-        user.home_station = morning_stops.most_common(1)[0][0]
+        winning_stop = morning_stops.most_common(1)[0][0]
+        winning_trip = next(t for t in morning_trips if t.origin_stop == winning_stop)
+        user.home_station = winning_stop
+        user.home_mode = winning_trip.mode
+        user.home_route_or_direction = winning_trip.route_or_direction
     if sum(evening_stops.values()) >= _MIN_TRIPS_PER_SLOT:
-        user.office_station = evening_stops.most_common(1)[0][0]
+        winning_stop = evening_stops.most_common(1)[0][0]
+        winning_trip = next(t for t in evening_trips if t.origin_stop == winning_stop)
+        user.office_station = winning_stop
+        user.office_mode = winning_trip.mode
+        user.office_route_or_direction = winning_trip.route_or_direction
 
     db.flush()
     return user
