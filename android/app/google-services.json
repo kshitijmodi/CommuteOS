@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1025515551408",
+    "project_id": "commuteos-e27a9",
+    "storage_bucket": "commuteos-e27a9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1025515551408:android:0e1e1a198cf501da281975",
+        "android_client_info": {
+          "package_name": "com.commuteos.commuteos"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB9WxCJ9r0jICB1kO8LzSDjZzH6Bh6Jnzs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

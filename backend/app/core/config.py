@@ -25,5 +25,12 @@ class Settings(BaseSettings):
     njt_username: str | None = None
     njt_password: str | None = None
 
+    # Firebase service account credentials (JSON), for sending real push
+    # notifications - see app/notify_service.py. The whole service account
+    # key file's contents as a single-line JSON string, never committed -
+    # same secret-handling pattern as GROQ_API_KEY/NJT_*. None until set,
+    # in which case send_push logs instead of sending (see that module).
+    firebase_credentials_json: str | None = None
+
 
 settings = Settings()

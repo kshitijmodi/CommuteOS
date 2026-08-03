@@ -46,6 +46,13 @@ dependencies:
   # and remembering the smart-notification toggle's on/off state locally.
   shared_preferences: ^2.5.3
 
+  # Real push notification delivery (see push_registration_service.dart) -
+  # firebase_core initializes the app from android/app/google-services.json;
+  # firebase_messaging gets the real device token the backend sends pushes
+  # to (see backend/app/notify_service.py).
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
 from ..models import User
-from ..notify_service import send_push
+from ..notify_service import PushSendException, send_push
 from ..recommendation_builder import CandidateSpec, build_recommendation
 
 
@@ -51,7 +51,9 @@ def _candidate_spec_for(
 async def send_notification_for_user(db: Session, user: User) -> bool:
     """Returns True if a notification was actually sent. False (not an
     error) for any of: not confirmed, no push token, no usable candidate,
-    or no live arrivals found for the candidates that do exist.
+    no live arrivals found for the candidates that do exist, or FCM itself
+    rejecting the send (e.g. a stale/invalid token) - one user's bad token
+    shouldn't stop the batch from notifying everyone else.
     """
     if not user.home_office_confirmed or not user.fcm_token:
         return False
@@ -74,11 +76,14 @@ async def send_notification_for_user(db: Session, user: User) -> bool:
         return False
 
     _best, message, _trip = outcome
-    send_push(
-        user.fcm_token,
-        title="Time to check your commute",
-        body=message,
-    )
+    try:
+        send_push(
+            user.fcm_token,
+            title="Time to check your commute",
+            body=message,
+        )
+    except PushSendException:
+        return False
     return True
 
 
