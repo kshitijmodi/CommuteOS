@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import (
     auth,
     home_office,
+    internal,
     preferences,
     recommendations,
     transit,
@@ -31,6 +32,7 @@ app.include_router(recommendations.router)
 app.include_router(trip_outcomes.router)
 app.include_router(home_office.router)
 app.include_router(transit.router)
+app.include_router(internal.router)
 
 
 @app.get("/health")

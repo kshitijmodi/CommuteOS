@@ -32,5 +32,13 @@ class Settings(BaseSettings):
     # in which case send_push logs instead of sending (see that module).
     firebase_credentials_json: str | None = None
 
+    # Shared secret for POST /internal/run-commute-job (see
+    # routers/internal.py) - the external GitHub Actions cron trigger
+    # authenticates with this instead of a per-user JWT, since it isn't
+    # acting on behalf of any one user. None disables the endpoint
+    # entirely (returns 503) rather than accepting an unauthenticated
+    # call to a job that sends real push notifications to every user.
+    internal_job_secret: str | None = None
+
 
 settings = Settings()

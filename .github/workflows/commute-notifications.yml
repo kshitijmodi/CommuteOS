@@ -1,0 +1,53 @@
+name: Trigger commute notifications
+
+# Runs the proactive commute-notification job (backend/app/jobs/
+# send_commute_notifications.py) once daily at 7:45 AM US Eastern time -
+# see OPEN_QUESTIONS.md for why this lives here rather than a Render cron
+# job (free tier doesn't include one) or an in-process scheduler (the
+# free-tier web service spins down when idle, so nothing running inside
+# it can reliably wake itself up on a schedule).
+#
+# GitHub Actions cron is UTC-only and has no DST awareness, so two
+# schedules are declared (7:45am EDT and 7:45am EST); each step checks the
+# real current US/Eastern offset at run time and no-ops if it isn't the
+# one that schedule was meant for, so only one of the two ever actually
+# calls the backend on a given day.
+on:
+  schedule:
+    - cron: "45 11 * * *" # 7:45am EDT (UTC-4, ~Mar-Nov)
+    - cron: "45 12 * * *" # 7:45am EST (UTC-5, ~Nov-Mar)
+  workflow_dispatch: {} # allows a manual run from the Actions tab for testing
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check this is the right schedule for the current DST offset
+        id: dst_check
+        run: |
+          current_offset=$(TZ="America/New_York" date +%z)
+          # cron "45 11" (EDT) should only proceed when the real offset is
+          # -0400; cron "45 12" (EST) only when it's -0500. A
+          # workflow_dispatch manual run always proceeds regardless.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "45 11 * * *" ] && [ "$current_offset" = "-0400" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "45 12 * * *" ] && [ "$current_offset" = "-0500" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger the backend commute-notification job
+        if: steps.dst_check.outputs.proceed == 'true'
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://commuteos-backend-wbwk.onrender.com/internal/run-commute-job" \
+            -H "X-Internal-Secret: ${{ secrets.INTERNAL_JOB_SECRET }}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" != "200" ]; then
+            exit 1
+          fi
