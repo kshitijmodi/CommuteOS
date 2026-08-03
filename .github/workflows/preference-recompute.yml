@@ -1,0 +1,38 @@
+name: Trigger preference recompute
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 3:00am EDT (UTC-4, ~Mar-Nov)
+    - cron: "0 8 * * *" # 3:00am EST (UTC-5, ~Nov-Mar)
+  workflow_dispatch: {} # allows a manual run from the Actions tab for testing
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check this is the right schedule for the current DST offset
+        id: dst_check
+        run: |
+          current_offset=$(TZ="America/New_York" date +%z)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 7 * * *" ] && [ "$current_offset" = "-0400" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 8 * * *" ] && [ "$current_offset" = "-0500" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger the backend preference-recompute job
+        if: steps.dst_check.outputs.proceed == 'true'
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://commuteos-backend-wbwk.onrender.com/internal/run-preference-recompute-job" \
+            -H "X-Internal-Secret: ${{ secrets.INTERNAL_JOB_SECRET }}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" != "200" ]; then
+            exit 1
+          fi

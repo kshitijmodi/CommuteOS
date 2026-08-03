@@ -2,11 +2,12 @@
 Also runs home/office inference (same nightly-job-stand-in pattern - see
 home_office_engine.py) since both derive from the same Trip history.
 
-Run manually for now (`python -m app.jobs.recompute_preferences`); wiring
-this to an actual OS-level scheduler (cron / Windows Task Scheduler / a
-hosted cron service) is a deployment concern, tracked in
-OPEN_QUESTIONS.md alongside backend hosting - not solved here, since it
-depends on where this ends up running.
+Can be run manually (`python -m app.jobs.recompute_preferences`) or, in
+production, is triggered nightly via POST
+/internal/run-preference-recompute-job (see routers/internal.py) by a
+scheduled GitHub Actions workflow - the same pattern used for the
+commute-notification job, since Render's free tier has no cron and the
+service sleeps when idle.
 """
 
 from ..core.database import SessionLocal

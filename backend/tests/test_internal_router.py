@@ -65,3 +65,92 @@ def test_run_commute_job_uses_a_real_session_not_the_test_override(client, monke
     client.post("/internal/run-commute-job", headers={"X-Internal-Secret": "correct-secret"})
 
     assert len(captured_dbs) == 1
+
+
+def test_run_preference_recompute_job_returns_503_when_secret_not_configured(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", None)
+
+    response = client.post(
+        "/internal/run-preference-recompute-job", headers={"X-Internal-Secret": "anything"}
+    )
+
+    assert response.status_code == 503
+
+
+def test_run_preference_recompute_job_rejects_missing_secret(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    response = client.post("/internal/run-preference-recompute-job")
+
+    assert response.status_code == 401
+
+
+def test_run_preference_recompute_job_rejects_wrong_secret(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    response = client.post(
+        "/internal/run-preference-recompute-job", headers={"X-Internal-Secret": "wrong-secret"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_run_preference_recompute_job_succeeds_with_correct_secret(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    def fake_recompute_all_preferences(db):
+        return 2
+
+    def fake_infer_home_and_office_for_all_users(db):
+        return 1
+
+    monkeypatch.setattr(
+        "app.routers.internal.recompute_all_preferences", fake_recompute_all_preferences
+    )
+    monkeypatch.setattr(
+        "app.routers.internal.infer_home_and_office_for_all_users",
+        fake_infer_home_and_office_for_all_users,
+    )
+
+    response = client.post(
+        "/internal/run-preference-recompute-job",
+        headers={"X-Internal-Secret": "correct-secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"preferences_recomputed": 2, "home_office_inferred": 1}
+
+
+def test_run_preference_recompute_job_uses_a_real_session_not_the_test_override(
+    client, monkeypatch
+):
+    """Same regression guard as the commute-job endpoint above - this job
+    also isn't a per-request user endpoint, so it must open its own
+    SessionLocal() rather than silently depending on get_db's test
+    override."""
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    captured_dbs = []
+
+    def fake_recompute_all_preferences(db):
+        captured_dbs.append(db)
+        return 0
+
+    def fake_infer_home_and_office_for_all_users(db):
+        captured_dbs.append(db)
+        return 0
+
+    monkeypatch.setattr(
+        "app.routers.internal.recompute_all_preferences", fake_recompute_all_preferences
+    )
+    monkeypatch.setattr(
+        "app.routers.internal.infer_home_and_office_for_all_users",
+        fake_infer_home_and_office_for_all_users,
+    )
+
+    client.post(
+        "/internal/run-preference-recompute-job",
+        headers={"X-Internal-Secret": "correct-secret"},
+    )
+
+    assert len(captured_dbs) == 2
