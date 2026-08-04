@@ -33,13 +33,19 @@ class PathService implements TransitService {
 
   final http.Client _client;
 
+  /// Without an explicit timeout, a stalled request against this
+  /// unofficial, no-SLA feed (see the class doc) never resolves - which
+  /// surfaces in the UI as an indefinite loading spinner rather than a
+  /// retryable error.
+  static const _requestTimeout = Duration(seconds: 15);
+
   @override
   Future<TransitArrivalsResult> getArrivals(TransitStation station) async {
     final pathStation = station as PathStation;
 
     final http.Response response;
     try {
-      response = await _client.get(_feedUri);
+      response = await _client.get(_feedUri).timeout(_requestTimeout);
     } catch (e) {
       throw PathFeedException('Failed to reach PATH feed: $e');
     }

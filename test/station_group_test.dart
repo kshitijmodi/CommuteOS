@@ -43,8 +43,40 @@ void main() {
     expect(groups.length, 1);
     expect(groups.single.stations.length, 3);
     expect(groups.single.hasSingleStation, isFalse);
-    expect(groups.single.allRoutes, ['1', 'N', 'Q', 'R', 'W']);
   });
+
+  test(
+    'flags a real name collision between unconnected MTA complexes, e.g. "23 St"',
+    () {
+      // Regression test for a real bug: MTA's Stations.csv has four
+      // separate, unconnected "23 St" stations (N/R/W, A/C/E, F/M, and the
+      // 1 train) that share nothing but a plain name. StationListTile used
+      // to union routes across every station sharing a name, so all four
+      // rows showed M (and A/C/E, and 1, etc.) even on stations those
+      // trains never serve - hasUnconnectedMtaCollision is what lets the
+      // tile detect this and skip the misleading combined chip list.
+      final groups = StationGroup.groupByName([
+        _mtaStation(stopId: 'R19', complexId: '14', name: '23 St', routes: ['N', 'R', 'W']),
+        _mtaStation(stopId: 'A30', complexId: '165', name: '23 St', routes: ['A', 'C', 'E']),
+        _mtaStation(stopId: 'D18', complexId: '228', name: '23 St', routes: ['F', 'M']),
+        _mtaStation(stopId: '130', complexId: '320', name: '23 St', routes: ['1']),
+      ]);
+
+      expect(groups.single.hasUnconnectedMtaCollision, isTrue);
+    },
+  );
+
+  test(
+    'does not flag a real connected complex (same complexId) as a collision',
+    () {
+      final groups = StationGroup.groupByName([
+        _mtaStation(stopId: 'R23', complexId: '623', name: 'Canal St', routes: ['R', 'W']),
+        _mtaStation(stopId: 'Q01', complexId: '623', name: 'Canal St', routes: ['N', 'Q']),
+      ]);
+
+      expect(groups.single.hasUnconnectedMtaCollision, isFalse);
+    },
+  );
 
   test('groups sort by natural station-name order', () {
     final groups = StationGroup.groupByName([
@@ -84,7 +116,11 @@ void main() {
 
       expect(groups.length, 1);
       expect(groups.single.stations.length, 2);
-      expect(groups.single.allRoutes, containsAll(['1', '2', '3', 'PATH']));
+      // A PATH+MTA merge at a real shared location is intentional, not an
+      // unconnected-MTA-complex collision (PATH isn't an MtaStation, so it
+      // doesn't contribute a complexId) - the combined chip list is correct
+      // here, unlike the "23 St" case above.
+      expect(groups.single.hasUnconnectedMtaCollision, isFalse);
     },
   );
 }

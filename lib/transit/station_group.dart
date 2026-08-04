@@ -1,3 +1,4 @@
+import '../mta/mta_station.dart';
 import 'natural_sort.dart';
 import 'transit_models.dart';
 
@@ -17,15 +18,23 @@ class StationGroup {
 
   bool get hasSingleStation => stations.length == 1;
 
-  /// All distinct route labels across every station in this group, for the
-  /// list row's subtitle when there's more than one station to summarize.
-  List<String> get allRoutes {
-    final routes = <String>{};
+  /// True when two or more stations in this group are MTA stations from
+  /// genuinely different, unconnected complexes that just happen to share a
+  /// plain name (e.g. four separate "23 St" stations on the N/R/W, A/C/E,
+  /// F/M, and 1 lines) - as opposed to platforms of one real complex, or a
+  /// PATH station intentionally merged with its co-located MTA counterpart
+  /// (see the "33 St"/"14 St"/"23 St" PATH/MTA merge). A route-chip list
+  /// combining routes across a name collision like this would show routes
+  /// (e.g. "M") on stations that don't actually have them - see
+  /// StationListTile, which uses this to avoid that.
+  bool get hasUnconnectedMtaCollision {
+    final complexIds = <String>{};
     for (final station in stations) {
-      routes.addAll(station.routes);
+      if (station is MtaStation) {
+        complexIds.add(station.complexId);
+      }
     }
-    final sorted = routes.toList()..sort();
-    return sorted;
+    return complexIds.length > 1;
   }
 
   static List<StationGroup> groupByName(List<TransitStation> stations) {

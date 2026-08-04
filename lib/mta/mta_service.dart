@@ -16,6 +16,11 @@ class MtaService implements TransitService {
 
   final http.Client _client;
 
+  /// Without an explicit timeout, a stalled request never resolves - which
+  /// surfaces in the UI as an indefinite loading spinner rather than a
+  /// retryable error.
+  static const _requestTimeout = Duration(seconds: 15);
+
   /// Fetches [feed] and returns arrivals at [stopId], sorted soonest first.
   ///
   /// [stopId] should be a GTFS stop_id, e.g. "R16N" for the northbound
@@ -26,7 +31,7 @@ class MtaService implements TransitService {
   ) async {
     final http.Response response;
     try {
-      response = await _client.get(feed.uri);
+      response = await _client.get(feed.uri).timeout(_requestTimeout);
     } catch (e) {
       throw MtaFeedException('Failed to reach MTA feed ${feed.name}: $e');
     }
@@ -138,7 +143,12 @@ class MtaService implements TransitService {
     MtaFeed feed,
     Set<String> stopIds,
   ) async {
-    final response = await _client.get(feed.uri);
+    final http.Response response;
+    try {
+      response = await _client.get(feed.uri).timeout(_requestTimeout);
+    } catch (e) {
+      throw MtaFeedException('Failed to reach MTA feed ${feed.name}: $e');
+    }
     if (response.statusCode != 200) {
       throw MtaFeedException(
         'MTA feed ${feed.name} returned HTTP ${response.statusCode}',

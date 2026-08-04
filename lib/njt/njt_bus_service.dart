@@ -14,11 +14,22 @@ class NjtBusService implements TransitService {
 
   final http.Client _client;
 
+  /// The Render backend this proxies through can take a while to wake up
+  /// from an idle cold-start (free tier) - without an explicit timeout, a
+  /// stalled request never resolves, which surfaces in the UI as an
+  /// indefinite loading spinner rather than a retryable error.
+  static const _requestTimeout = Duration(seconds: 20);
+
   @override
   Future<TransitArrivalsResult> getArrivals(TransitStation station) async {
-    final response = await _client.get(
-      Uri.parse('$apiBaseUrl/transit/njt-bus/${station.id}'),
-    );
+    final http.Response response;
+    try {
+      response = await _client
+          .get(Uri.parse('$apiBaseUrl/transit/njt-bus/${station.id}'))
+          .timeout(_requestTimeout);
+    } catch (e) {
+      throw NjtBusFeedException('Failed to reach NJT bus proxy: $e');
+    }
 
     if (response.statusCode != 200) {
       throw NjtBusFeedException(

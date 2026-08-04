@@ -55,19 +55,26 @@ class StationListTile extends StatelessWidget {
     // One RouteChip per distinct (agency, route) pair, in a stable order,
     // e.g. real MTA/NJT line colors for each route ID plus a single PATH
     // chip rather than repeating "PATH" per line (PATH's routes list is
-    // agency-level only, not per-line - see PathStation.routes).
-    final seen = <String>{};
+    // agency-level only, not per-line - see PathStation.routes). Skipped
+    // entirely when this name maps to multiple unconnected MTA stations
+    // (e.g. four separate, unrelated "23 St"s on different lines) - unioning
+    // their routes here would show a route like "M" on stations that don't
+    // actually have it; the picker sheet shown on tap displays each
+    // station's real routes individually instead.
     final chips = <Widget>[];
-    for (final station in group.stations) {
-      if (station.agency == Agency.path) {
-        if (seen.add('path')) {
-          chips.add(RouteChip(agency: Agency.path, label: 'PATH'));
+    if (!group.hasUnconnectedMtaCollision) {
+      final seen = <String>{};
+      for (final station in group.stations) {
+        if (station.agency == Agency.path) {
+          if (seen.add('path')) {
+            chips.add(RouteChip(agency: Agency.path, label: 'PATH'));
+          }
+          continue;
         }
-        continue;
-      }
-      for (final route in station.routes) {
-        if (seen.add('${station.agency}:$route')) {
-          chips.add(RouteChip(agency: station.agency, label: route));
+        for (final route in station.routes) {
+          if (seen.add('${station.agency}:$route')) {
+            chips.add(RouteChip(agency: station.agency, label: route));
+          }
         }
       }
     }

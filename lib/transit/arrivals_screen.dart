@@ -37,8 +37,19 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   };
   final _tripLogger = TripLogger();
   Timer? _timer;
-  Future<TransitArrivalsResult>? _future;
   bool _hasLoggedTrip = false;
+
+  // The 30s background refresh polls flaky/best-effort feeds (PATH has no
+  // documented SLA, NJT rail/bus proxy through a free-tier backend that can
+  // cold-start-timeout - see the class doc). A single transient failure
+  // used to blank the whole screen with a hard error and repeat every 30s
+  // for as long as the screen stayed open. Now: only the very first load
+  // (no data shown yet) can show the error state; once real data has
+  // loaded once, a failed background refresh just leaves it on screen
+  // (with a small "couldn't refresh" banner) instead of replacing it.
+  TransitArrivalsResult? _lastGoodResult;
+  Object? _initialLoadError;
+  bool _refreshFailed = false;
 
   @override
   void initState() {
@@ -48,10 +59,27 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   }
 
   void _refresh() {
-    setState(() {
-      _future = _service.getArrivals(widget.station)
-        ..then(_logTripOnce, onError: (_) {});
-    });
+    _service
+        .getArrivals(widget.station)
+        .then((result) {
+          _logTripOnce(result);
+          if (!mounted) return;
+          setState(() {
+            _lastGoodResult = result;
+            _initialLoadError = null;
+            _refreshFailed = false;
+          });
+        })
+        .catchError((error) {
+          if (!mounted) return;
+          setState(() {
+            if (_lastGoodResult == null) {
+              _initialLoadError = error;
+            } else {
+              _refreshFailed = true;
+            }
+          });
+        });
   }
 
   /// Logs the trip once real arrivals data has actually loaded (not in
@@ -118,50 +146,50 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
           color: AppColors.accent,
           backgroundColor: AppColors.surfaceRaised,
           onRefresh: () async => _refresh(),
-          child: FutureBuilder<TransitArrivalsResult>(
-            future: _future,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const AppLoader();
-              }
-              if (snapshot.hasError) {
-                return _messageList(
-                  Icons.wifi_off_rounded,
-                  'Live data unavailable',
-                  '${snapshot.error}',
-                );
-              }
-              if (directions.isEmpty) {
-                return _messageList(
-                  Icons.info_outline_rounded,
-                  'No direction data',
-                  'This station has no direction data available.',
-                );
-              }
-
-              final result = snapshot.data!;
-              return Column(
-                children: [
-                  if (!result.isLive) _staleBanner(context),
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        for (final d in directions)
-                          _ArrivalsList(
-                            agency: widget.station.agency,
-                            arrivals:
-                                result.arrivalsByDirectionKey[d.key] ??
-                                const [],
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+          child: _buildBody(context, directions),
         ),
       ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, List<TransitDirection> directions) {
+    final result = _lastGoodResult;
+
+    if (result == null) {
+      if (_initialLoadError != null) {
+        return _messageList(
+          Icons.wifi_off_rounded,
+          'Live data unavailable',
+          '$_initialLoadError',
+        );
+      }
+      return const AppLoader();
+    }
+
+    if (directions.isEmpty) {
+      return _messageList(
+        Icons.info_outline_rounded,
+        'No direction data',
+        'This station has no direction data available.',
+      );
+    }
+
+    return Column(
+      children: [
+        if (!result.isLive) _staleBanner(context),
+        if (result.isLive && _refreshFailed) _refreshFailedBanner(context),
+        Expanded(
+          child: TabBarView(
+            children: [
+              for (final d in directions)
+                _ArrivalsList(
+                  agency: widget.station.agency,
+                  arrivals: result.arrivalsByDirectionKey[d.key] ?? const [],
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -180,6 +208,35 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
           const Expanded(
             child: Text(
               'Live data unavailable — showing the last known estimate.',
+              style: TextStyle(color: AppColors.warning, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shown when a background refresh (the 30s poll or a manual
+  /// pull-to-refresh) fails but we already have a good result on screen -
+  /// distinct from [_staleBanner] (which reflects the feed itself reporting
+  /// non-live data). Here the feed may well be fine; our attempt to reach it
+  /// just failed, so we keep showing what we already had instead of
+  /// blanking the screen with a hard error.
+  Widget _refreshFailedBanner(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: AppColors.warning.withValues(alpha: 0.12),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 16, color: AppColors.warning),
+          const SizedBox(width: AppSpacing.sm),
+          const Expanded(
+            child: Text(
+              "Couldn't refresh — showing the last update.",
               style: TextStyle(color: AppColors.warning, fontSize: 12),
             ),
           ),

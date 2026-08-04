@@ -30,16 +30,23 @@ class NjtBusStopRepository {
       final stopId = row[stopIdCol].toString();
       if (stopId.isEmpty) continue;
 
+      final routeNames = row[routesCol]
+          .toString()
+          .split('|')
+          .where((r) => r.isNotEmpty)
+          .toList();
+      // A stop_id with no scheduled routes at all (~1% of the bundled
+      // stops, but ~19% at large multi-bay terminals like Journal Square -
+      // see build_njt_bus_stops.py) has nothing real to show: no route
+      // badge, and no way to distinguish it from every other blank row at
+      // the same terminal. Almost always a bay-level stop_id NJT's static
+      // schedule data never assigns a trip to (inactive/reserved/stale),
+      // not a genuinely in-service stop the join is failing to find - skip
+      // it rather than show a confusing routeless row.
+      if (routeNames.isEmpty) continue;
+
       stops.add(
-        NjtBusStop(
-          stopId: stopId,
-          name: row[nameCol].toString(),
-          routeNames: row[routesCol]
-              .toString()
-              .split('|')
-              .where((r) => r.isNotEmpty)
-              .toList(),
-        ),
+        NjtBusStop(stopId: stopId, name: row[nameCol].toString(), routeNames: routeNames),
       );
     }
 
