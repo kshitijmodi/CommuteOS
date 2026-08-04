@@ -78,6 +78,22 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
                   Icons.search_rounded,
                   color: AppColors.textTertiary,
                 ),
+                // Only shown once there's text to clear - lets you wipe the
+                // query in one tap without focusing the field (and raising
+                // the keyboard) just to backspace it out manually.
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: AppColors.textTertiary,
+                        ),
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                      ),
                 isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppRadius.pill),
