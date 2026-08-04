@@ -10,11 +10,28 @@ class LearnedPreferences {
     required this.walkingToleranceM,
     required this.transferAversionScore,
     required this.reliabilityPref,
+    required this.tripCount,
+    required this.walkingToleranceLearned,
   });
 
   final double walkingToleranceM;
   final double transferAversionScore;
   final double reliabilityPref;
+
+  /// How many trips this user has logged in total - the backend's real
+  /// signal for whether the values above reflect actual usage or are still
+  /// just untouched schema defaults (see preference_engine.py).
+  final int tripCount;
+
+  /// Whether [walkingToleranceM] has actually been recomputed from real
+  /// trip history (see backend's MIN_TRIPS_FOR_WALKING_TOLERANCE) - false
+  /// means it's still the untouched default and shouldn't be presented as
+  /// something CommuteOS has learned. transferAversionScore has no
+  /// equivalent flag: it's always the neutral default today regardless of
+  /// tripCount (the real signal for it doesn't exist in the data model
+  /// yet - see the backend module's docstring), so it should always be
+  /// treated as not-yet-learned rather than gated on tripCount.
+  final bool walkingToleranceLearned;
 
   factory LearnedPreferences.fromJson(Map<String, dynamic> json) {
     return LearnedPreferences(
@@ -22,6 +39,8 @@ class LearnedPreferences {
       transferAversionScore: (json['transfer_aversion_score'] as num)
           .toDouble(),
       reliabilityPref: (json['reliability_pref'] as num).toDouble(),
+      tripCount: (json['trip_count'] as num).toInt(),
+      walkingToleranceLearned: json['walking_tolerance_learned'] as bool,
     );
   }
 }

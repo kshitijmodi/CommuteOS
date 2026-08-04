@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from .models import Preference, Trip, User
 
 DEFAULT_WALKING_TOLERANCE_M = 400.0
-_MIN_TRIPS_FOR_WALKING_TOLERANCE = 5  # PRD: "over ~5 trips"
+MIN_TRIPS_FOR_WALKING_TOLERANCE = 5  # PRD: "over ~5 trips"
 
 
 def recompute_preferences_for_user(db: Session, user_id) -> Preference:
@@ -46,7 +46,7 @@ def recompute_preferences_for_user(db: Session, user_id) -> Preference:
         preference = Preference(user_id=user_id)
         db.add(preference)
 
-    if len(trips) >= _MIN_TRIPS_FOR_WALKING_TOLERANCE:
+    if len(trips) >= MIN_TRIPS_FOR_WALKING_TOLERANCE:
         preference.walking_tolerance_m = _estimate_walking_tolerance(trips)
 
     # transfer_aversion_score intentionally left untouched - see module

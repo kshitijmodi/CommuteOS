@@ -168,11 +168,23 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
 
           return Column(
             children: [
-              const SectionHeader('Compare right now'),
+              const SectionHeader('Compare specific options'),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 child: Text(
-                  'Select two or more favorites to compare.',
+                  // This mode doesn't know your actual origin/destination -
+                  // it only ranks whichever specific stations you select
+                  // against each other by soonest live arrival. It's meant
+                  // for comparing two real alternatives to the same place
+                  // (e.g. two stations near the same destination), not for
+                  // picking stations that don't relate to one trip - that
+                  // will look like a "random" pick, since it has no way to
+                  // know they're unrelated. Confirm home/office in "What
+                  // CommuteOS has learned" for a recommendation that
+                  // actually knows where you're commuting to.
+                  'Select two or more favorites that are real alternatives to each other '
+                  '(e.g. two ways to reach the same place) - this compares them by live '
+                  'arrival time only, without knowing your actual commute.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),

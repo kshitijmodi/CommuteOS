@@ -30,6 +30,18 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     super.initState();
     _stationsFuture = _stationDirectory.loadAllStations();
     _loadFavorites();
+    // Favoriting/unfavoriting from the separate bottom-nav Search tab (a
+    // persistent sibling widget, not something pushed on top of this one -
+    // see root_shell.dart) doesn't touch this screen's state at all by
+    // itself, since IndexedStack keeps both tabs alive without rebuilding
+    // one when the other changes. Listening here is what picks that up.
+    FavoritesRepository.changes.addListener(_loadFavorites);
+  }
+
+  @override
+  void dispose() {
+    FavoritesRepository.changes.removeListener(_loadFavorites);
+    super.dispose();
   }
 
   Future<void> _loadFavorites() async {
@@ -39,21 +51,27 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   Future<void> _removeFavorite(TransitStation station) async {
     await _favoritesRepository.setFavorite(station, false);
-    await _loadFavorites();
   }
 
   Future<void> _openSearch() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const StationSearchScreen()),
     );
-    // Favorites may have changed while the search screen was open.
-    await _loadFavorites();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CommuteOS')),
+      appBar: AppBar(
+        title: const Text('CommuteOS'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            tooltip: 'Search stations',
+            onPressed: _openSearch,
+          ),
+        ],
+      ),
       body: FutureBuilder<List<TransitStation>>(
         future: _stationsFuture,
         builder: (context, snapshot) {

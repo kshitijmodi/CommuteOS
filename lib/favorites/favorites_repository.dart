@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../transit/transit_models.dart';
@@ -12,6 +13,19 @@ import '../transit/transit_models.dart';
 /// there's no guarantee that holds once NJ Transit is added too.
 class FavoritesRepository {
   static const _prefsKey = 'favorite_station_keys';
+
+  /// Fires whenever any favorite is added/removed, from any
+  /// FavoritesRepository instance anywhere in the app (this is
+  /// process-wide, not per-instance - see the static field below).
+  ///
+  /// The Favorites tab and the Search tab each keep their own persistent
+  /// widget state (bottom-nav tabs live in an IndexedStack, so switching
+  /// tabs never disposes/rebuilds the other one) - a favorite toggled on
+  /// one tab used to leave the other tab showing stale data until
+  /// something else happened to trigger a reload. Listening to this
+  /// notifier is how a screen picks up a change made on a different tab
+  /// immediately, without needing route-lifecycle tricks.
+  static final ValueNotifier<int> changes = ValueNotifier(0);
 
   String _keyFor(TransitStation station) =>
       '${station.agency.name}:${station.id}';
@@ -34,5 +48,6 @@ class FavoritesRepository {
       current.remove(key);
     }
     await prefs.setStringList(_prefsKey, current.toList());
+    changes.value++;
   }
 }

@@ -100,6 +100,11 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
           }
 
           final walkingMiles = preferences.walkingToleranceM / 1609.34;
+          // reliability_pref is the PRD's one explicit onboarding input
+          // (not derived from trip history the way walking tolerance is),
+          // so it's always meaningful to show regardless of trip_count -
+          // it just starts at a neutral default until the user changes it
+          // somewhere else in the app.
           final reliabilityLabel = preferences.reliabilityPref < 0.4
               ? 'You prefer arriving on time over arriving fastest.'
               : preferences.reliabilityPref > 0.6
@@ -174,17 +179,39 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                     _PreferenceRow(
                       icon: Icons.directions_walk_rounded,
                       title: 'Walking tolerance',
-                      value: '${walkingMiles.toStringAsFixed(2)} mi',
+                      value: preferences.walkingToleranceLearned
+                          ? '${walkingMiles.toStringAsFixed(2)} mi'
+                          : null,
                     ),
                     const Divider(height: AppSpacing.lg),
-                    _PreferenceRow(
+                    // transfer_aversion_score has no "learned" state at all
+                    // yet (see LearnedPreferences' docstring) - always
+                    // shown as not-yet-learned rather than a real number,
+                    // regardless of trip_count.
+                    const _PreferenceRow(
                       icon: Icons.compare_arrows_rounded,
                       title: 'Transfer aversion',
-                      value: '${(preferences.transferAversionScore * 100).round()}%',
+                      value: null,
                     ),
                   ],
                 ),
               ),
+              if (!preferences.walkingToleranceLearned) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    preferences.tripCount == 0
+                        ? "Still learning — browse a few commutes and this will personalize."
+                        : 'Still learning — ${preferences.tripCount} trip'
+                              '${preferences.tripCount == 1 ? '' : 's'} logged so far, '
+                              'a few more will personalize this.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: AppColors.textTertiary),
+                  ),
+                ),
+              ],
               const SizedBox(height: AppSpacing.md),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -292,7 +319,11 @@ class _PreferenceRow extends StatelessWidget {
 
   final IconData icon;
   final String title;
-  final String value;
+
+  /// Null when this preference hasn't actually been learned from real
+  /// usage yet - shown as "Still learning" instead of a number that would
+  /// otherwise look like a real, confident measurement.
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
@@ -304,8 +335,10 @@ class _PreferenceRow extends StatelessWidget {
           child: Text(title, style: Theme.of(context).textTheme.bodyLarge),
         ),
         Text(
-          value,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.accent),
+          value ?? 'Still learning',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: value == null ? AppColors.textTertiary : AppColors.accent,
+          ),
         ),
       ],
     );

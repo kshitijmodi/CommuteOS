@@ -32,6 +32,11 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
         .loadAllStations()
         .then(StationGroup.groupByName);
     _loadFavorites();
+    // See FavoritesScreen's identical listener - the Favorites tab is a
+    // persistent sibling widget (IndexedStack), not something this screen
+    // is pushed on top of, so a favorite removed there wouldn't otherwise
+    // be reflected here until something else triggered a reload.
+    FavoritesRepository.changes.addListener(_loadFavorites);
   }
 
   Future<void> _loadFavorites() async {
@@ -40,15 +45,12 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
   }
 
   Future<void> _toggleFavorite(TransitStation station, bool isFavorite) async {
-    setState(() {
-      _favoriteKeys = {..._favoriteKeys};
-    });
     await _favoritesRepository.setFavorite(station, isFavorite);
-    await _loadFavorites();
   }
 
   @override
   void dispose() {
+    FavoritesRepository.changes.removeListener(_loadFavorites);
     _searchController.dispose();
     super.dispose();
   }
