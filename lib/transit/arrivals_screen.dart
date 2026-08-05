@@ -64,6 +64,25 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
         .then((result) {
           _logTripOnce(result);
           if (!mounted) return;
+
+          // A background refresh (we already have real data on screen)
+          // that comes back with nothing in any direction is treated the
+          // same as a failed refresh, not adopted - NJT's live GTFS-RT
+          // snapshot can genuinely have a momentary gap between updates
+          // (e.g. a bus that just departed, no new one posted yet) and
+          // still return a real, successful, empty response. Without this,
+          // that one flaky poll would replace a real arrivals list with
+          // "no arrivals found" for 30s, then flip back on the next poll -
+          // a real bug a user hit in practice. The very first load is
+          // exempt: a genuinely empty result then (e.g. no more service
+          // tonight) is a real state worth showing, not a hiccup to hide.
+          final isEmptyAcrossAllDirections = result.arrivalsByDirectionKey.values
+              .every((arrivals) => arrivals.isEmpty);
+          if (_lastGoodResult != null && isEmptyAcrossAllDirections) {
+            setState(() => _refreshFailed = true);
+            return;
+          }
+
           setState(() {
             _lastGoodResult = result;
             _initialLoadError = null;

@@ -5,17 +5,6 @@ import '../design/theme.dart';
 import 'station_group.dart';
 import 'transit_models.dart';
 
-/// Distinct from [agencyLabel] (used for the single-station arrivals app
-/// bar badge) - "NJT" alone is fine there, but reads ambiguously next to
-/// "NJT Bus" in this sheet's filter row, so rail gets its own clearer label
-/// here specifically.
-String _pickerAgencyLabel(Agency agency) => switch (agency) {
-  Agency.mta => 'MTA',
-  Agency.path => 'PATH',
-  Agency.njtRail => 'NJT Rail',
-  Agency.njtBus => 'NJT Bus',
-};
-
 /// Bottom sheet shown when a station name maps to more than one physical
 /// station (e.g. several unconnected complexes, or several platforms of one
 /// complex) — lets the user pick which specific one they mean.
@@ -31,7 +20,7 @@ Future<TransitStation?> showStationPicker(
   StationGroup group,
 ) {
   final agencies = group.stations.map((s) => s.agency).toSet().toList()
-    ..sort((a, b) => _pickerAgencyLabel(a).compareTo(_pickerAgencyLabel(b)));
+    ..sort((a, b) => agencyFilterLabel(a).compareTo(agencyFilterLabel(b)));
 
   return showModalBottomSheet<TransitStation>(
     context: context,
@@ -112,15 +101,15 @@ class _StationPickerContentState extends State<_StationPickerContent> {
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 children: [
-                  _AgencyFilterChip(
+                  AgencyFilterChip(
                     label: 'All',
                     selected: _selectedAgency == null,
                     onTap: () => setState(() => _selectedAgency = null),
                   ),
                   const SizedBox(width: 6),
                   for (final agency in widget.agencies) ...[
-                    _AgencyFilterChip(
-                      label: _pickerAgencyLabel(agency),
+                    AgencyFilterChip(
+                      label: agencyFilterLabel(agency),
                       color: agencyColor(agency),
                       selected: _selectedAgency == agency,
                       onTap: () => setState(() => _selectedAgency = agency),
@@ -145,7 +134,7 @@ class _StationPickerContentState extends State<_StationPickerContent> {
                         4,
                       ),
                       child: Text(
-                        _pickerAgencyLabel(entry.key),
+                        agencyFilterLabel(entry.key),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: AppColors.textTertiary,
                           fontWeight: FontWeight.w700,
@@ -160,37 +149,6 @@ class _StationPickerContentState extends State<_StationPickerContent> {
           ),
           const SizedBox(height: AppSpacing.sm),
         ],
-      ),
-    );
-  }
-}
-
-class _AgencyFilterChip extends StatelessWidget {
-  const _AgencyFilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.color,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final chipColor = color ?? AppColors.accent;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onTap(),
-      selectedColor: chipColor.withValues(alpha: 0.24),
-      backgroundColor: AppColors.surfaceRaised,
-      side: BorderSide(color: selected ? chipColor : AppColors.border),
-      labelStyle: TextStyle(
-        color: selected ? chipColor : AppColors.textSecondary,
-        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
       ),
     );
   }

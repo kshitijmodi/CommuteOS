@@ -4,9 +4,14 @@ import '../transit/transit_models.dart';
 /// (getTrainSchedule19Rec) has no direction/platform split to query by -
 /// one call returns every upcoming departure at the station, mixed
 /// together, across every line serving it. [directions] returns a single
-/// synthetic "Departures" entry so ArrivalsScreen's existing single-tab
-/// path (already built for PATH-like agencies with fewer directions) just
-/// works, without needing a special case for "no real directions."
+/// synthetic "Arrivals" entry (matching NjtBusStop's wording, and the
+/// app's own ArrivalsScreen/empty-state naming, rather than "Departures" -
+/// a real inconsistency this app used to have between rail and bus) so
+/// ArrivalsScreen's existing single-tab path (already built for PATH-like
+/// agencies with fewer directions) just works, without needing a special
+/// case for "no real directions." The internal `key` stays 'departures'
+/// (matching njt_rail_service.dart's map key) - only the user-visible
+/// label changed.
 class NjtRailStation implements TransitStation {
   const NjtRailStation({
     required this.code,
@@ -44,7 +49,7 @@ class NjtRailStation implements TransitStation {
 
   @override
   List<TransitDirection> get directions => const [
-    TransitDirection(label: 'Departures', key: 'departures'),
+    TransitDirection(label: 'Arrivals', key: 'departures'),
   ];
 
   @override

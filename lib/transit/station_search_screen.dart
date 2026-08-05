@@ -8,8 +8,11 @@ import 'station_group.dart';
 import 'station_list_tile.dart';
 import 'transit_models.dart';
 
-/// Full searchable list of every station across every agency. Each row can
-/// also be favorited/unfavorited from here.
+/// Full searchable list of every station across every agency, with an
+/// agency filter (a station group spanning multiple agencies - e.g.
+/// Journal Square's PATH/NJT rail/NJT bus - matches the filter if ANY of
+/// its member stations do). Each row can also be favorited/unfavorited
+/// from here.
 class StationSearchScreen extends StatefulWidget {
   const StationSearchScreen({super.key});
 
@@ -24,6 +27,9 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
   late Future<List<StationGroup>> _groupsFuture;
   Set<String> _favoriteKeys = {};
   String _query = '';
+
+  /// null means "All agencies" - the filter row's default.
+  Agency? _selectedAgency;
 
   @override
   void initState() {
@@ -129,28 +135,65 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
 
           final groups = snapshot.data ?? const <StationGroup>[];
           final query = _query.trim().toLowerCase();
-          final filtered = query.isEmpty
+          final byQuery = query.isEmpty
               ? groups
               : groups
                     .where((g) => g.name.toLowerCase().contains(query))
                     .toList();
+          final selectedAgency = _selectedAgency;
+          final filtered = selectedAgency == null
+              ? byQuery
+              : byQuery
+                    .where((g) => g.stations.any((s) => s.agency == selectedAgency))
+                    .toList();
 
-          if (filtered.isEmpty) {
-            return const EmptyState(
-              icon: Icons.search_off_rounded,
-              title: 'No stations match your search',
-            );
-          }
-
-          return ListView(
+          return Column(
             children: [
-              for (final group in filtered)
-                StationListTile(
-                  group: group,
-                  isStationFavorite: (s) =>
-                      _favoritesRepository.isFavorite(_favoriteKeys, s),
-                  onStationFavoriteToggle: _toggleFavorite,
+              SizedBox(
+                height: 44,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
+                  ),
+                  children: [
+                    AgencyFilterChip(
+                      label: 'All',
+                      selected: _selectedAgency == null,
+                      onTap: () => setState(() => _selectedAgency = null),
+                    ),
+                    const SizedBox(width: 6),
+                    for (final agency in Agency.values) ...[
+                      AgencyFilterChip(
+                        label: agencyFilterLabel(agency),
+                        color: agencyColor(agency),
+                        selected: _selectedAgency == agency,
+                        onTap: () => setState(() => _selectedAgency = agency),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                  ],
                 ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const EmptyState(
+                        icon: Icons.search_off_rounded,
+                        title: 'No stations match your search',
+                      )
+                    : ListView(
+                        children: [
+                          for (final group in filtered)
+                            StationListTile(
+                              group: group,
+                              isStationFavorite: (s) =>
+                                  _favoritesRepository.isFavorite(_favoriteKeys, s),
+                              onStationFavoriteToggle: _toggleFavorite,
+                            ),
+                        ],
+                      ),
+              ),
             ],
           );
         },

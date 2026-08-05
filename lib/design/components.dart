@@ -21,14 +21,37 @@ String agencyLabel(Agency agency) => switch (agency) {
   Agency.njtBus => 'NJT Bus',
 };
 
+/// Distinct from [agencyLabel] - "NJT" alone is fine for a single-agency
+/// badge (e.g. the arrivals app bar), but reads ambiguously next to "NJT
+/// Bus" in a filter row that shows both at once, so rail gets its own
+/// clearer label here. Shared by the station search screen's and the
+/// station picker sheet's agency filter chips.
+String agencyFilterLabel(Agency agency) => switch (agency) {
+  Agency.mta => 'MTA',
+  Agency.path => 'PATH',
+  Agency.njtRail => 'NJT Rail',
+  Agency.njtBus => 'NJT Bus',
+};
+
 /// Formats an arrival's absolute time as 12-hour clock time, e.g. "5:24 PM".
 /// Shown as a secondary detail alongside the "N min" countdown per user
 /// feedback that a relative-only countdown wasn't enough — a real station
 /// clock/Google Maps both show the actual time too, not just minutes-away.
+///
+/// Always converts to local time first - NJT rail/bus arrivals arrive here
+/// as UTC-flagged DateTimes (parsed from the backend's ISO timestamps),
+/// and reading .hour/.minute off a UTC value directly displays the raw UTC
+/// wall-clock time instead of the device's real local time (off by the
+/// UTC/Eastern offset, ~4-5h) - a real bug that shipped because the "N min"
+/// countdown next to it (a timezone-agnostic instant difference) looked
+/// correct, masking that this label didn't. MTA/PATH build already-local
+/// DateTimes, so .toLocal() is a no-op for them - safe to call
+/// unconditionally here rather than relying on every call site to remember.
 String formatClockTime(DateTime time) {
-  final hour12 = time.hour % 12 == 0 ? 12 : time.hour % 12;
-  final minute = time.minute.toString().padLeft(2, '0');
-  final period = time.hour < 12 ? 'AM' : 'PM';
+  final local = time.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour < 12 ? 'AM' : 'PM';
   return '$hour12:$minute $period';
 }
 
@@ -184,6 +207,44 @@ class RouteChip extends StatelessWidget {
           fontWeight: FontWeight.w700,
           color: onColor,
         ),
+      ),
+    );
+  }
+}
+
+/// A tappable chip for filtering a list by agency/mode - "All" plus one
+/// per agency. Shared by the station search screen and the multi-agency
+/// station picker sheet, so both filter UIs look and behave identically.
+class AgencyFilterChip extends StatelessWidget {
+  const AgencyFilterChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.color,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// Null for the "All" chip, which uses the app's single accent color
+  /// rather than any one agency's.
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final chipColor = color ?? AppColors.accent;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      selectedColor: chipColor.withValues(alpha: 0.24),
+      backgroundColor: AppColors.surfaceRaised,
+      side: BorderSide(color: selected ? chipColor : AppColors.border),
+      labelStyle: TextStyle(
+        color: selected ? chipColor : AppColors.textSecondary,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
       ),
     );
   }
