@@ -5,7 +5,7 @@
          needed are gone now that this is server push, not a local timer. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
-        android:label="commuteos"
+        android:label="CommuteOS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
