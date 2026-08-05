@@ -1,3 +1,5 @@
+from datetime import timezone
+
 import httpx
 import pytest
 
@@ -71,7 +73,12 @@ async def test_get_arrivals_computes_delay_adjusted_time(monkeypatch):
     arrival = result.arrivals[0]
     assert arrival.route_label == "NE"
     # SCHED_DEP_DATE (12:25:00 PM) + SEC_LATE (300s = 5min) = 12:30:00 PM
-    assert arrival.arrival_time.hour == 12
+    # Eastern (EDT, UTC-4 in August) = 16:30 UTC. arrival_time must be a
+    # real UTC instant, not the Eastern wall-clock value mislabeled as UTC -
+    # regression test for a real bug where every NJT rail arrival was off
+    # by the ET/UTC offset (see njt_rail.py's _parse_predicted_arrival).
+    assert arrival.arrival_time.tzinfo == timezone.utc
+    assert arrival.arrival_time.hour == 16
     assert arrival.arrival_time.minute == 30
 
 
@@ -98,7 +105,42 @@ async def test_get_arrivals_handles_negative_sec_late_early_train(monkeypatch):
 
     result = await njt_rail.get_arrivals("NP")
 
+    # 12:25:00 PM EDT - 60s = 12:24:00 PM EDT = 16:24 UTC.
+    assert result.arrivals[0].arrival_time.hour == 16
     assert result.arrivals[0].arrival_time.minute == 24
+
+
+@pytest.mark.asyncio
+async def test_get_arrivals_converts_correctly_across_the_dst_boundary(monkeypatch):
+    """Regression test for the real bug (see _parse_predicted_arrival's
+    docstring): a fixed-hours-offset shortcut would be wrong on one side of
+    the EDT/EST transition. Nov 1, 2026 is EST (UTC-5), unlike the other
+    tests above which fall in EDT (UTC-4) - if the conversion ever
+    hardcodes one offset instead of using the real IANA zone, this is the
+    test that would catch it.
+    """
+    monkeypatch.setattr(njt_rail.settings, "njt_username", "user")
+    monkeypatch.setattr(njt_rail.settings, "njt_password", "pass")
+
+    schedule = {
+        "ITEMS": [
+            {
+                "SCHED_DEP_DATE": "01-Nov-2026 12:25:00 PM",
+                "SEC_LATE": "0",
+                "LINECODE": "NE",
+            }
+        ]
+    }
+    _install_mock_transport(
+        monkeypatch,
+        _mock_handler({"Authenticated": "True", "UserToken": "abc123"}, schedule),
+    )
+
+    result = await njt_rail.get_arrivals("NP")
+
+    # 12:25:00 PM EST (UTC-5) = 17:25 UTC.
+    assert result.arrivals[0].arrival_time.hour == 17
+    assert result.arrivals[0].arrival_time.minute == 25
 
 
 @pytest.mark.asyncio

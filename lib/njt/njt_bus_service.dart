@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../account/api_config.dart';
 import '../transit/transit_models.dart';
+import 'njt_bus_stop.dart';
 
 /// Fetches NJT bus real-time arrivals through our own backend
 /// (`GET /transit/njt-bus/{stop_id}`), same reasoning as NjtRailService:
@@ -22,11 +23,20 @@ class NjtBusService implements TransitService {
 
   @override
   Future<TransitArrivalsResult> getArrivals(TransitStation station) async {
+    // A combined-terminal stop (e.g. Journal Square, merged from many bay
+    // stop_ids sharing one name - see NjtBusStopRepository) needs every
+    // bay's arrivals fetched together, not just the primary one - see
+    // allStopIds. Ordinary single-bay stops just send the one id.
+    final stopIds = station is NjtBusStop ? station.allStopIds : [station.id];
+    final primaryStopId = stopIds.first;
+    final extraStopIds = stopIds.skip(1).join(',');
+    final uri = Uri.parse('$apiBaseUrl/transit/njt-bus/$primaryStopId').replace(
+      queryParameters: extraStopIds.isEmpty ? null : {'extra_stop_ids': extraStopIds},
+    );
+
     final http.Response response;
     try {
-      response = await _client
-          .get(Uri.parse('$apiBaseUrl/transit/njt-bus/${station.id}'))
-          .timeout(_requestTimeout);
+      response = await _client.get(uri).timeout(_requestTimeout);
     } catch (e) {
       throw NjtBusFeedException('Failed to reach NJT bus proxy: $e');
     }

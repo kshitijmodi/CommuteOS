@@ -25,6 +25,7 @@ a surprise later:
 
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -39,6 +40,11 @@ _SCHEDULE_URL = "https://raildata.njtransit.com/api/TrainData/getTrainSchedule19
 # rate-limited (per NJT's docs) - caching is not an optimization here,
 # it's required to stay within that limit.
 _TOKEN_LIFETIME_SECONDS = 23 * 60 * 60
+
+# NJT's timestamps have no offset and are always Eastern local time (the
+# whole service is NYC-metro only) - this is the one place that fact needs
+# to be made explicit, converting to a real UTC instant.
+_EASTERN = ZoneInfo("America/New_York")
 
 _cached_token: str | None = None
 _cached_token_at: float = 0.0
@@ -80,11 +86,17 @@ def _parse_predicted_arrival(item: dict) -> datetime | None:
         sec_late = int(item.get("SEC_LATE") or 0)
     except (KeyError, ValueError, TypeError):
         return None
-    # NJT's timestamps are Eastern local time with no offset given; treat
-    # as-is rather than guess a real IANA-aware conversion here (arrivals
-    # are only ever compared to "now" in the same implicit local sense
-    # elsewhere in this app - see the PRD's NYC-metro-only scope).
-    return (scheduled + timedelta(seconds=sec_late)).replace(tzinfo=timezone.utc)
+    # scheduled is a naive Eastern-local wall-clock value (NJT gives no
+    # offset). Attach the real IANA zone first, THEN add the delay and
+    # convert to UTC - this correctly handles the EDT/EST DST transition
+    # (a fixed-hours-offset shortcut would be wrong on either side of it).
+    # Previously this attached tzinfo=timezone.utc directly, which mislabels
+    # the Eastern wall-clock value as if it were already UTC without
+    # actually converting it - every arrival was off by the real UTC
+    # offset (4-5 hours), which is why arrival times looked wrong/like
+    # "now" once clients started comparing against a real UTC "now".
+    eastern_time = scheduled.replace(tzinfo=_EASTERN) + timedelta(seconds=sec_late)
+    return eastern_time.astimezone(timezone.utc)
 
 
 async def get_arrivals(station_code: str) -> ArrivalsResult:

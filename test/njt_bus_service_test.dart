@@ -42,6 +42,28 @@ void main() {
     await service.getArrivals(_stop);
 
     expect(requestedUri!.path, endsWith('/transit/njt-bus/1941'));
+    expect(requestedUri!.queryParameters, isEmpty);
+  });
+
+  test('sends every bay\'s stop_id for a merged combined-terminal stop', () async {
+    const combinedStop = NjtBusStop(
+      stopId: '16792',
+      name: 'Journal Square Transportation Center',
+      routeNames: ['1', '2', '10'],
+      mergedStopIds: ['16792', '16802', '16943'],
+    );
+    Uri? requestedUri;
+    final service = NjtBusService(
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response(_fixture(), 200);
+      }),
+    );
+
+    await service.getArrivals(combinedStop);
+
+    expect(requestedUri!.path, endsWith('/transit/njt-bus/16792'));
+    expect(requestedUri!.queryParameters['extra_stop_ids'], '16802,16943');
   });
 
   test('throws NjtBusFeedException on non-200 response', () async {

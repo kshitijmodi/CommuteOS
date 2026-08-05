@@ -25,7 +25,19 @@ class NjtBusStopRepository {
     final nameCol = header.indexOf('stop_name');
     final routesCol = header.indexOf('routes');
 
-    final stops = <NjtBusStop>[];
+    // Grouped by name first, not appended directly to a flat list - large
+    // terminals (Journal Square, Irvington Bus Terminal, Secaucus Junction
+    // Bus Plaza, and others - confirmed via the bundled CSV) are modeled by
+    // NJT's static GTFS as many separate bay-level stop_ids sharing one
+    // exact stop_name, with no single stop_id representing "every bus at
+    // this terminal." Verified these are genuine same-location bay
+    // clusters, not an unrelated-stops-sharing-a-name collision, by
+    // checking coordinate spread stays within ~30m for every repeated name
+    // in the dataset. Each name's bays get merged into one combined
+    // NjtBusStop below so a user picks the terminal once and sees every
+    // bay's arrivals together, instead of having to guess which of ~26
+    // near-identical rows has the bus they want.
+    final byName = <String, List<(String stopId, List<String> routes)>>{};
     for (final row in rows.skip(1)) {
       final stopId = row[stopIdCol].toString();
       if (stopId.isEmpty) continue;
@@ -45,10 +57,20 @@ class NjtBusStopRepository {
       // it rather than show a confusing routeless row.
       if (routeNames.isEmpty) continue;
 
-      stops.add(
-        NjtBusStop(stopId: stopId, name: row[nameCol].toString(), routeNames: routeNames),
-      );
+      byName.putIfAbsent(row[nameCol].toString(), () => []).add((stopId, routeNames));
     }
+
+    final stops = <NjtBusStop>[
+      for (final entry in byName.entries)
+        NjtBusStop(
+          stopId: entry.value.first.$1,
+          name: entry.key,
+          routeNames: {for (final bay in entry.value) ...bay.$2}.toList()..sort(),
+          mergedStopIds: entry.value.length > 1
+              ? [for (final bay in entry.value) bay.$1]
+              : null,
+        ),
+    ];
 
     stops.sort((a, b) => compareStationNames(a.name, b.name));
     _cache = stops;

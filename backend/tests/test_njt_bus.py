@@ -70,7 +70,7 @@ async def test_get_arrivals_joins_route_via_bundled_trip_lookup(monkeypatch, tmp
         _mock_handler({"Authenticated": "True", "UserToken": "abc123"}, feed_bytes),
     )
 
-    result = await njt_bus.get_arrivals("12345")
+    result = await njt_bus.get_arrivals(["12345"])
 
     assert result.is_live is True
     assert len(result.arrivals) == 1
@@ -91,9 +91,38 @@ async def test_get_arrivals_filters_by_requested_stop_id(monkeypatch):
         _mock_handler({"Authenticated": "True", "UserToken": "abc123"}, feed_bytes),
     )
 
-    result = await njt_bus.get_arrivals("12345")
+    result = await njt_bus.get_arrivals(["12345"])
 
     assert len(result.arrivals) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_arrivals_merges_multiple_stop_ids_in_one_feed_fetch(monkeypatch):
+    """Regression test for the real "Journal Square has 26 separate bay
+    stop_ids with no single combined arrivals view" bug - a caller can now
+    pass every bay's stop_id and get one merged, soonest-first list back
+    from a single feed fetch, rather than being forced to pick one bay.
+    """
+    monkeypatch.setattr(njt_bus.settings, "njt_username", "user")
+    monkeypatch.setattr(njt_bus.settings, "njt_password", "pass")
+    njt_bus._route_by_trip_id = {"1": "1", "2": "2", "3": "10"}
+
+    feed_bytes = _build_feed(
+        [
+            ("1", "", [("16792", 1900000200)]),  # trip "1" -> route "1", bay 16792
+            ("2", "", [("16802", 1900000100)]),  # trip "2" -> route "2", bay 16802 - soonest
+            ("3", "", [("16943", 1900000300)]),  # trip "3" -> route "10", bay 16943
+            ("4", "", [("99999", 1900000050)]),  # a bay NOT requested - must be excluded
+        ]
+    )
+    _install_mock_transport(
+        monkeypatch,
+        _mock_handler({"Authenticated": "True", "UserToken": "abc123"}, feed_bytes),
+    )
+
+    result = await njt_bus.get_arrivals(["16792", "16802", "16943"])
+
+    assert [a.route_label for a in result.arrivals] == ["2", "1", "10"]
 
 
 @pytest.mark.asyncio
@@ -108,7 +137,7 @@ async def test_get_arrivals_falls_back_to_bus_label_for_unknown_trip(monkeypatch
         _mock_handler({"Authenticated": "True", "UserToken": "abc123"}, feed_bytes),
     )
 
-    result = await njt_bus.get_arrivals("12345")
+    result = await njt_bus.get_arrivals(["12345"])
 
     assert result.arrivals[0].route_label == "Bus"
 
@@ -135,7 +164,7 @@ async def test_get_arrivals_skips_updates_with_no_arrival_field(monkeypatch):
         ),
     )
 
-    result = await njt_bus.get_arrivals("12345")
+    result = await njt_bus.get_arrivals(["12345"])
 
     assert result.arrivals == []
 
@@ -161,4 +190,4 @@ async def test_get_arrivals_raises_on_malformed_feed(monkeypatch):
     )
 
     with pytest.raises(njt_bus.NjtBusFeedException):
-        await njt_bus.get_arrivals("12345")
+        await njt_bus.get_arrivals(["12345"])

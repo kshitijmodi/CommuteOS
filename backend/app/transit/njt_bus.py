@@ -77,9 +77,22 @@ async def _get_token() -> str:
     return _cached_token
 
 
-async def get_arrivals(stop_id: str) -> ArrivalsResult:
+async def get_arrivals(stop_ids: list[str]) -> ArrivalsResult:
+    """Fetches arrivals for one or more stop_ids in a single feed fetch and
+    merges them, sorted soonest-first.
+
+    Large terminals (e.g. Journal Square) are split across many separate
+    bay-level stop_ids in NJT's own static GTFS - there's no single stop_id
+    that represents "every bus at this terminal." Since this feed already
+    covers every route in one fetch (see the module docstring), accepting
+    multiple stop_ids costs nothing extra over a single one - it's the
+    same feed, just matched against a larger stop_id set - so the caller
+    (a combined-terminal NjtBusStop on the Flutter side) can present one
+    merged arrivals view instead of forcing a pick among near-identical bays.
+    """
     token = await _get_token()
     route_by_trip_id = _load_route_by_trip_id()
+    wanted_stop_ids = set(stop_ids)
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(_TRIP_UPDATES_URL, data={"token": token})
@@ -99,7 +112,7 @@ async def get_arrivals(stop_id: str) -> ArrivalsResult:
         route_label = route_by_trip_id.get(trip_update.trip.trip_id, "Bus")
 
         for stop_time_update in trip_update.stop_time_update:
-            if stop_time_update.stop_id != stop_id:
+            if stop_time_update.stop_id not in wanted_stop_ids:
                 continue
             if not stop_time_update.HasField("arrival"):
                 continue

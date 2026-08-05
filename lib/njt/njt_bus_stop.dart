@@ -15,11 +15,14 @@ class NjtBusStop implements TransitStation {
     required this.stopId,
     required this.name,
     required this.routeNames,
-  });
+    List<String>? mergedStopIds,
+  }) : mergedStopIds = mergedStopIds ?? const [];
 
   /// NJT's own numeric stop_id, e.g. "1941" - what the real-time API's
   /// stop_time_update.stop_id matches against. Distinct numbering from
-  /// NJT rail's 2-char station codes.
+  /// NJT rail's 2-char station codes. For a merged multi-bay entry (see
+  /// [mergedStopIds]), this is just the first/primary bay - arrivals still
+  /// need every bay's id, not only this one.
   final String stopId;
   @override
   final String name;
@@ -30,6 +33,19 @@ class NjtBusStop implements TransitStation {
   /// trip (looked up backend-side from trip_id, since NJT's real-time
   /// feed leaves route_id empty - see backend/app/transit/njt_bus.py).
   final List<String> routeNames;
+
+  /// Every bay-level stop_id folded into this entry, when NJT's static
+  /// GTFS models one physical terminal as several separate stop_ids
+  /// sharing an identical name (e.g. Journal Square's ~26 bays) - see
+  /// NjtBusStopRepository.loadStations. Empty for an ordinary single-bay
+  /// stop (the common case) - callers needing "every stop_id this
+  /// TransitStation represents" should use [allStopIds] instead of this
+  /// field directly, since that also covers the empty/single-bay case.
+  final List<String> mergedStopIds;
+
+  /// Every real stop_id arrivals need to be fetched for - just [stopId]
+  /// for an ordinary stop, or the full bay list for a merged terminal.
+  List<String> get allStopIds => mergedStopIds.isEmpty ? [stopId] : mergedStopIds;
 
   @override
   Agency get agency => Agency.njtBus;
