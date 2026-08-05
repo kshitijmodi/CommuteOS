@@ -44,3 +44,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Reference images used to design the app icon/splash (assets/icon/) -
+# not app assets themselves, and the stock-photo one is watermarked - kept
+# locally for reference only, never committed.
+/commuteos icon.jpg
+/commuteos_icon_2.png

@@ -64,6 +64,14 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # Generate the Android launcher icon (flutter_launcher_icons) and native
+  # splash screen (flutter_native_splash) from the assets in assets/icon/ -
+  # see the flutter_launcher_icons:/flutter_native_splash: config sections
+  # below. Both are one-shot code generators (`dart run <package>:main`),
+  # not runtime dependencies of the app itself.
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.4
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -80,6 +88,7 @@ flutter:
     - assets/data/mta_stations.csv
     - assets/data/njt_rail_stations.csv
     - assets/data/njt_bus_stops.csv
+    - assets/icon/icon_master.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -106,3 +115,28 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Generates android/app/src/main/res/mipmap-*/ic_launcher.png (legacy) and
+# the adaptive icon (foreground/background layers, mipmap-anydpi-v26/) from
+# these two source images - see assets/icon/ for the SVG sources they were
+# rendered from. Run `dart run flutter_launcher_icons` to regenerate after
+# editing either PNG.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon_master.png"
+  adaptive_icon_background: "#1c150f"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+
+# Generates the native splash screen (shown instantly on cold start, before
+# the Flutter engine/first frame is ready) from the same brand assets -
+# matches CommuteOS's own dark theme rather than the Flutter default white
+# screen. Run `dart run flutter_native_splash:create` to regenerate.
+flutter_native_splash:
+  color: "#1c150f"
+  image: "assets/icon/icon_foreground.png"
+  android_12:
+    color: "#1c150f"
+    image: "assets/icon/icon_foreground.png"
+  android: true
+  ios: false

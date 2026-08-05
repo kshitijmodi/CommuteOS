@@ -1,0 +1,15 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pinGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4de8c0"/>
+      <stop offset="100%" stop-color="#1c9a80"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="#1c150f"/>
+  <!-- pin (viewBox 0 0 120 120 scaled/centered to fill most of the 1024 canvas) -->
+  <g transform="translate(102,102) scale(6.8)">
+    <path d="M60 14 C39 14 24 30 24 51 C24 78 60 106 60 106 C60 106 96 78 96 51 C96 30 81 14 60 14 Z" fill="url(#pinGrad)"/>
+    <path d="M60 30 C47 30 37 40 37 51 C37 62 47 70 60 70"
+          fill="none" stroke="#1c150f" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>

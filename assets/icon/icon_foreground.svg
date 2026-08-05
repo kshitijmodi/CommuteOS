@@ -1,0 +1,16 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pinGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4de8c0"/>
+      <stop offset="100%" stop-color="#1c9a80"/>
+    </linearGradient>
+  </defs>
+  <!-- Adaptive icon safe zone is the center ~66% (roughly 66dp of 108dp) -
+       pin scaled/centered to stay well inside it so circular/rounded-square
+       system masks never clip the shape. -->
+  <g transform="translate(212,212) scale(5.0)">
+    <path d="M60 14 C39 14 24 30 24 51 C24 78 60 106 60 106 C60 106 96 78 96 51 C96 30 81 14 60 14 Z" fill="url(#pinGrad)"/>
+    <path d="M60 30 C47 30 37 40 37 51 C37 62 47 70 60 70"
+          fill="none" stroke="#1c150f" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>
