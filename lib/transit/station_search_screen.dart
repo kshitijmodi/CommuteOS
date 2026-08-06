@@ -149,30 +149,27 @@ class _StationSearchScreenState extends State<StationSearchScreen> {
 
           return Column(
             children: [
-              SizedBox(
-                height: 44,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.md,
-                    vertical: AppSpacing.sm,
-                  ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
                     AgencyFilterChip(
                       label: 'All',
                       selected: _selectedAgency == null,
                       onTap: () => setState(() => _selectedAgency = null),
                     ),
-                    const SizedBox(width: 6),
-                    for (final agency in Agency.values) ...[
+                    for (final agency in Agency.values)
                       AgencyFilterChip(
                         label: agencyFilterLabel(agency),
                         color: agencyColor(agency),
                         selected: _selectedAgency == agency,
                         onTap: () => setState(() => _selectedAgency = agency),
                       ),
-                      const SizedBox(width: 6),
-                    ],
                   ],
                 ),
               ),

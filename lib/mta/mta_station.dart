@@ -55,7 +55,14 @@ class MtaStation implements TransitStation {
   String get id => gtfsStopId;
 
   @override
-  String get area => borough;
+  String get area => switch (borough) {
+    'M' => 'Manhattan',
+    'Bk' => 'Brooklyn',
+    'Bx' => 'Bronx',
+    'Q' => 'Queens',
+    'SI' => 'Staten Island',
+    _ => borough,
+  };
 
   @override
   List<TransitDirection> get directions => [

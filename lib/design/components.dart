@@ -271,13 +271,19 @@ class AgencyFilterChip extends StatelessWidget {
       label: Text(label),
       selected: selected,
       onSelected: (_) => onTap(),
-      selectedColor: chipColor.withValues(alpha: 0.24),
+      showCheckmark: false,
+      selectedColor: chipColor,
       backgroundColor: AppColors.surfaceRaised,
       side: BorderSide(color: selected ? chipColor : AppColors.border),
       labelStyle: TextStyle(
-        color: selected ? chipColor : AppColors.textSecondary,
+        fontSize: 11,
+        color: selected ? Colors.white : AppColors.textSecondary,
         fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
       ),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 }

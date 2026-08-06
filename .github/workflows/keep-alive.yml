@@ -1,0 +1,27 @@
+name: Keep backend warm
+
+# Render's free tier spins the web service down after ~15 min of no
+# traffic; the next real request then pays a cold-start tax (30-60s+)
+# before it responds. This uniquely hurts NJT rail/bus, since those are
+# the only agencies proxied through our own backend (MTA/PATH/LIRR fetch
+# directly from the Flutter app) - see OPEN_QUESTIONS.md.
+#
+# A GET against /health every 10 minutes is well under that 15-minute
+# window, so the service never goes idle long enough to spin down.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {} # allows a manual run from the Actions tab for testing
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the backend's health endpoint
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://commuteos-backend-wbwk.onrender.com/health")
+          echo "Health check responded: $response"
+          if [ "$response" != "200" ]; then
+            exit 1
+          fi

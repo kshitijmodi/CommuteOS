@@ -95,27 +95,24 @@ class _StationPickerContentState extends State<_StationPickerContent> {
             ),
           ),
           if (showAgencyFilter)
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
                 children: [
                   AgencyFilterChip(
                     label: 'All',
                     selected: _selectedAgency == null,
                     onTap: () => setState(() => _selectedAgency = null),
                   ),
-                  const SizedBox(width: 6),
-                  for (final agency in widget.agencies) ...[
+                  for (final agency in widget.agencies)
                     AgencyFilterChip(
                       label: agencyFilterLabel(agency),
                       color: agencyColor(agency),
                       selected: _selectedAgency == agency,
                       onTap: () => setState(() => _selectedAgency = agency),
                     ),
-                    const SizedBox(width: 6),
-                  ],
                 ],
               ),
             ),
