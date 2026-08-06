@@ -168,6 +168,44 @@ def test_home_and_office_modes_tracked_independently_across_agencies(db_session)
     assert result.office_mode == "njt_rail"
 
 
+def test_prefers_a_trip_with_route_or_direction_over_an_earlier_routeless_one(db_session):
+    # Regression test for a real bug: infer_home_and_office used to just
+    # take the FIRST trip matching the winning stop in query order (via
+    # next()), regardless of whether it had a route_or_direction. If a
+    # user's earliest trip to their usual station happened before they
+    # picked a specific route tab (or - as found via a demo/test seeding
+    # mishap - some trips were logged without one at all), home_station
+    # would resolve correctly but home_route_or_direction stayed null even
+    # though later trips for the SAME station did capture one - silently
+    # breaking MTA/PATH auto-recommendations, which can't fetch arrivals
+    # without a route_or_direction (see recommendation_builder.
+    # _candidate_spec_for).
+    user = _make_user(db_session)
+    _add_trip(db_session, user.id, "R20N", hour=8, days_ago=5, mode="mta")  # no route - earliest
+    for i in range(4):
+        _add_trip(
+            db_session, user.id, "R20N", hour=8, days_ago=i, mode="mta", route_or_direction="N"
+        )
+    db_session.commit()
+
+    result = infer_home_and_office(db_session, user.id)
+
+    assert result.home_station == "R20N"
+    assert result.home_route_or_direction == "N"
+
+
+def test_falls_back_to_first_match_when_none_have_route_or_direction(db_session):
+    user = _make_user(db_session)
+    for i in range(4):
+        _add_trip(db_session, user.id, "R20N", hour=8, days_ago=i, mode="mta")
+    db_session.commit()
+
+    result = infer_home_and_office(db_session, user.id)
+
+    assert result.home_station == "R20N"
+    assert result.home_route_or_direction is None
+
+
 def test_does_not_touch_confirmed_flag(db_session):
     user = _make_user(db_session)
     user.home_office_confirmed = True

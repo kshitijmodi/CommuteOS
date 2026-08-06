@@ -29,6 +29,23 @@ _MIN_TRIPS_PER_SLOT = 3
 _NOON_HOUR = 12
 
 
+def _pick_representative_trip(trips: list[Trip], winning_stop: str) -> Trip:
+    """Among every trip matching the winning stop, prefers one that
+    actually captured a mode+route_or_direction MTA/PATH candidates need
+    to fetch live arrivals later (see recommendation_builder.
+    _candidate_spec_for) - a plain "first match in query order" can just
+    as easily land on an earlier trip logged before the user ever picked a
+    specific route/direction tab, silently leaving home_route_or_direction
+    null even when later trips for the same station did capture one. Falls
+    back to the first match if none of them have one (nothing better to
+    pick), same behavior as before for that case.
+    """
+    for trip in trips:
+        if trip.origin_stop == winning_stop and trip.route_or_direction:
+            return trip
+    return next(t for t in trips if t.origin_stop == winning_stop)
+
+
 def infer_home_and_office(db: Session, user_id) -> User:
     """Updates home_station/office_station (plus their _mode companions) if
     enough data exists. Does NOT touch home_office_confirmed - that's only
@@ -59,13 +76,13 @@ def infer_home_and_office(db: Session, user_id) -> User:
 
     if sum(morning_stops.values()) >= _MIN_TRIPS_PER_SLOT:
         winning_stop = morning_stops.most_common(1)[0][0]
-        winning_trip = next(t for t in morning_trips if t.origin_stop == winning_stop)
+        winning_trip = _pick_representative_trip(morning_trips, winning_stop)
         user.home_station = winning_stop
         user.home_mode = winning_trip.mode
         user.home_route_or_direction = winning_trip.route_or_direction
     if sum(evening_stops.values()) >= _MIN_TRIPS_PER_SLOT:
         winning_stop = evening_stops.most_common(1)[0][0]
-        winning_trip = next(t for t in evening_trips if t.origin_stop == winning_stop)
+        winning_trip = _pick_representative_trip(evening_trips, winning_stop)
         user.office_station = winning_stop
         user.office_mode = winning_trip.mode
         user.office_route_or_direction = winning_trip.route_or_direction
