@@ -34,6 +34,20 @@ class RecommendationRequest(BaseModel):
     candidates: list[CandidateRequest]
 
 
+class AlternativeOut(BaseModel):
+    """One route that was considered but didn't win - shown alongside the
+    winner so the AI's tradeoff sentence (see llm_phrasing.phrase_comparison)
+    isn't a black box; a user can see the actual numbers it's reasoning
+    over instead of just trusting the sentence.
+    """
+
+    mode: str
+    label: str
+    predicted_arrival: datetime
+    confidence: float
+    is_live: bool
+
+
 class RecommendationResponse(BaseModel):
     mode: str
     label: str
@@ -42,6 +56,7 @@ class RecommendationResponse(BaseModel):
     is_live: bool
     message: str
     trip_id: str
+    alternatives: list[AlternativeOut] = []
 
 
 @router.post("", response_model=RecommendationResponse)
@@ -73,7 +88,7 @@ async def get_recommendation(
             detail="No live arrivals found for any candidate route",
         )
 
-    best, message, trip = outcome
+    best, alternatives, message, trip = outcome
     db.commit()
     db.refresh(trip)
 
@@ -85,6 +100,16 @@ async def get_recommendation(
         is_live=best.is_live,
         message=message,
         trip_id=str(trip.id),
+        alternatives=[
+            AlternativeOut(
+                mode=a.mode,
+                label=a.label,
+                predicted_arrival=a.predicted_arrival,
+                confidence=a.confidence,
+                is_live=a.is_live,
+            )
+            for a in alternatives
+        ],
     )
 
 
@@ -117,7 +142,7 @@ async def get_recommendation_from_home_office(
             detail="No live arrivals found for your home/office stations",
         )
 
-    best, message, trip = outcome
+    best, alternatives, message, trip = outcome
     db.commit()
     db.refresh(trip)
 
@@ -129,4 +154,14 @@ async def get_recommendation_from_home_office(
         is_live=best.is_live,
         message=message,
         trip_id=str(trip.id),
+        alternatives=[
+            AlternativeOut(
+                mode=a.mode,
+                label=a.label,
+                predicted_arrival=a.predicted_arrival,
+                confidence=a.confidence,
+                is_live=a.is_live,
+            )
+            for a in alternatives
+        ],
     )

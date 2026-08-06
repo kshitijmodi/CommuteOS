@@ -56,6 +56,32 @@ void main() {
       expect(result, isNotNull);
       expect(result!.mode, 'mta');
       expect(result.label, 'R20N');
+      // No "alternatives" key in this payload at all - should default to
+      // empty rather than throw, since older/simpler responses (or a
+      // single-candidate comparison) never include one.
+      expect(result.alternatives, isEmpty);
+    });
+
+    test('parses real alternatives when the backend compared 2+ candidates', () async {
+      final authRepository = await _loggedInAuthRepository();
+      final repository = RecommendationRepository(
+        authRepository: authRepository,
+        client: MockClient(
+          (request) async => http.Response(
+            '{"mode":"mta","label":"R20N","predicted_arrival":"2026-01-01T08:10:00Z",'
+            '"confidence":0.9,"is_live":true,"message":"Take the N - it is sooner.",'
+            '"trip_id":"abc","alternatives":[{"mode":"path","label":"PATH",'
+            '"predicted_arrival":"2026-01-01T08:15:00Z","confidence":0.9,"is_live":true}]}',
+            200,
+          ),
+        ),
+      );
+
+      final result = await repository.getRecommendationFromHomeOffice();
+
+      expect(result!.alternatives, hasLength(1));
+      expect(result.alternatives.single.mode, 'path');
+      expect(result.alternatives.single.label, 'PATH');
     });
 
     test('throws for a real (non-404) backend error', () async {

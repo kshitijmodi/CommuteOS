@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from .decision_engine import RankedRoute, RouteCandidate, rank_routes
-from .llm_phrasing import phrase_recommendation
+from .llm_phrasing import phrase_comparison
 from .models import Trip, User
 from .transit import lirr, mta, njt_bus, njt_rail, path
 
@@ -96,21 +96,22 @@ async def fetch_candidates(specs: list[CandidateSpec]) -> list[RouteCandidate]:
 
 async def build_recommendation(
     db: Session, user: User, specs: list[CandidateSpec]
-) -> tuple[RankedRoute, str, Trip] | None:
+) -> tuple[RankedRoute, list[RankedRoute], str, Trip] | None:
     """Fetches arrivals, ranks them by the user's reliability_pref, phrases
-    the winner, and logs it as a Trip (same trust-preserving pattern as
-    POST /recommendations - see that router's docstring). Returns None if
-    no candidate has any live arrivals to rank. Does NOT commit - the
-    caller decides transaction boundaries (the API commits per-request;
-    the notification job commits once per user processed).
+    the winner (explaining the tradeoff against any real alternatives, see
+    phrase_comparison), and logs it as a Trip (same trust-preserving
+    pattern as POST /recommendations - see that router's docstring).
+    Returns None if no candidate has any live arrivals to rank. Does NOT
+    commit - the caller decides transaction boundaries (the API commits
+    per-request; the notification job commits once per user processed).
     """
     candidates = await fetch_candidates(specs)
     ranked = rank_routes(candidates, reliability_pref=user.reliability_pref, now=datetime.now(timezone.utc))
     if not ranked:
         return None
 
-    best = ranked[0]
-    message = phrase_recommendation(best)
+    best, alternatives = ranked[0], ranked[1:]
+    message = phrase_comparison(best, alternatives)
 
     trip = Trip(
         user_id=user.id,
@@ -122,4 +123,4 @@ async def build_recommendation(
     db.add(trip)
     db.flush()
 
-    return best, message, trip
+    return best, alternatives, message, trip

@@ -121,6 +121,34 @@ def test_recommendation_picks_soonest_candidate(client):
     assert body["confidence"] == 0.9
     assert len(body["message"]) > 0
     assert body["trip_id"]
+    # The loser (PATH) should come back as an alternative, not just be
+    # discarded - the whole point of comparing 2+ real candidates is being
+    # able to show/explain the tradeoff, not just the winner in isolation.
+    assert len(body["alternatives"]) == 1
+    assert body["alternatives"][0]["mode"] == "path"
+    assert body["alternatives"][0]["label"] == "PATH"
+
+
+def test_recommendation_has_no_alternatives_for_a_single_candidate(client):
+    token = _signup_and_login(client, email="onecandidate@example.com")
+
+    response = client.post(
+        "/recommendations",
+        json={
+            "candidates": [
+                {
+                    "agency": "mta",
+                    "label": "N train",
+                    "stop_or_station": "R20N",
+                    "route_or_direction": "N",
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["alternatives"] == []
 
 
 def test_recommendation_supports_njt_rail_candidate(client):
@@ -288,6 +316,8 @@ def test_from_home_office_picks_soonest_of_home_and_office(client, db_session):
     assert body["mode"] == "mta"
     assert body["label"] == "R20N"
     assert body["trip_id"]
+    assert len(body["alternatives"]) == 1
+    assert body["alternatives"][0]["mode"] == "path"
 
 
 def test_from_home_office_logs_a_trip(client, db_session):

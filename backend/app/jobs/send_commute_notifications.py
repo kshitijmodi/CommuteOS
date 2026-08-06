@@ -46,7 +46,7 @@ async def send_notification_for_user(db: Session, user: User) -> bool:
     if outcome is None:
         return False
 
-    _best, message, _trip = outcome
+    _best, _alternatives, message, _trip = outcome
     try:
         send_push(
             user.fcm_token,

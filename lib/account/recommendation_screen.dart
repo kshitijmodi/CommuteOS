@@ -10,6 +10,7 @@ import '../njt/njt_rail_station.dart';
 import '../path/path_station.dart';
 import '../transit/station_directory.dart';
 import '../transit/transit_models.dart';
+import 'recommendation_card.dart';
 import 'recommendation_repository.dart';
 
 /// Phase 3: get a single recommendation for which route to take right now.
@@ -313,31 +314,7 @@ class _RecommendationResult extends StatelessWidget {
           );
         }
 
-        final recommendation = snapshot.data!;
-        return AppCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Icon(Icons.bolt_rounded, color: AppColors.accent),
-                  LiveStatusPill(isLive: recommendation.isLive),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                recommendation.message,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Confidence: ${(recommendation.confidence * 100).round()}%',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        );
+        return RecommendationCard(recommendation: snapshot.data!);
       },
     );
   }

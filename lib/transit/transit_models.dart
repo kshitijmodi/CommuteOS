@@ -25,6 +25,19 @@ const Map<Agency, String> _agencyWireNames = {
 
 String wireAgencyName(Agency agency) => _agencyWireNames[agency]!;
 
+/// The reverse of [wireAgencyName] - needed anywhere a backend response
+/// carries a wire-format agency string back to the client (e.g.
+/// Recommendation.mode) and the UI wants to show it with the station's
+/// real agency color/label rather than raw text. Null for an unrecognized
+/// string rather than throwing, since this reads server data the client
+/// doesn't fully control the shape of.
+Agency? agencyFromWireName(String wireName) {
+  for (final entry in _agencyWireNames.entries) {
+    if (entry.value == wireName) return entry.key;
+  }
+  return null;
+}
+
 /// A physical station, agency-agnostic. Implemented by MtaStation and
 /// PathStation.
 abstract class TransitStation {

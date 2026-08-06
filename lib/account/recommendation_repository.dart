@@ -15,6 +15,7 @@ class Recommendation {
     required this.isLive,
     required this.message,
     required this.tripId,
+    this.alternatives = const [],
   });
 
   final String mode;
@@ -22,8 +23,20 @@ class Recommendation {
   final DateTime predictedArrival;
   final double confidence;
   final bool isLive;
+
+  /// The AI-phrased sentence - if [alternatives] is non-empty, this
+  /// explains the tradeoff against them (e.g. "sooner than your PATH"),
+  /// not just this route's own number in isolation - see the backend's
+  /// llm_phrasing.phrase_comparison.
   final String message;
   final String tripId;
+
+  /// Every other real candidate that was considered and lost, soonest to
+  /// least-soonest (per the backend's ranking) - shown alongside [message]
+  /// so the AI's tradeoff explanation isn't a black box; a rider can see
+  /// the actual numbers it reasoned over. Empty when there was only one
+  /// candidate to begin with (nothing to compare against).
+  final List<RecommendationAlternative> alternatives;
 
   factory Recommendation.fromJson(Map<String, dynamic> json) {
     return Recommendation(
@@ -34,6 +47,36 @@ class Recommendation {
       isLive: json['is_live'] as bool,
       message: json['message'] as String,
       tripId: json['trip_id'] as String,
+      alternatives: ((json['alternatives'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(RecommendationAlternative.fromJson)
+          .toList(),
+    );
+  }
+}
+
+class RecommendationAlternative {
+  const RecommendationAlternative({
+    required this.mode,
+    required this.label,
+    required this.predictedArrival,
+    required this.confidence,
+    required this.isLive,
+  });
+
+  final String mode;
+  final String label;
+  final DateTime predictedArrival;
+  final double confidence;
+  final bool isLive;
+
+  factory RecommendationAlternative.fromJson(Map<String, dynamic> json) {
+    return RecommendationAlternative(
+      mode: json['mode'] as String,
+      label: json['label'] as String,
+      predictedArrival: DateTime.parse(json['predicted_arrival'] as String),
+      confidence: (json['confidence'] as num).toDouble(),
+      isLive: json['is_live'] as bool,
     );
   }
 }

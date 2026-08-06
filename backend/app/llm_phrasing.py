@@ -77,3 +77,86 @@ def _template_phrase(route: RankedRoute) -> str:
     time_str = route.predicted_arrival.strftime("%I:%M %p").lstrip("0")
     hedge = "should" if route.confidence >= 0.6 else "might"
     return f"Your {route.label} {hedge} arrive around {time_str}."
+
+
+_COMPARISON_SYSTEM_PROMPT = """You are a transit assistant. You will be given \
+a JSON object with a "winner" (the recommended route) and an "alternatives" \
+list (every other option that was considered), each with mode, label, \
+predicted arrival time, and a confidence score between 0 and 1. The winner \
+was already chosen by a separate scoring system - your only job is to \
+explain in ONE short sentence (under 220 characters) WHY it beat the \
+alternatives, in a natural, direct tone.
+
+Rules you must never break:
+- Only use the numbers/times given to you. Never invent, adjust, or round a \
+time in a way that changes its meaning, and never invent a reason that \
+isn't reflected in the given numbers (e.g. don't claim "crowding" or \
+"weather" - you weren't given that data).
+- The real reason the winner won is either it arrives sooner, or it's more \
+reliable (higher confidence) - name whichever one actually applies by \
+comparing the numbers yourself.
+- Reflect the given confidence honestly - do not sound more certain than \
+the confidence score warrants. Confidence below 0.6 should sound hedged \
+("looks like", "should").
+- Do not mention "confidence" or "score" as words - translate them into \
+natural certainty in your tone instead.
+- Output only the sentence, no preamble, no quotes around it."""
+
+
+def phrase_comparison(winner: RankedRoute, alternatives: list[RankedRoute]) -> str:
+    """Like [phrase_recommendation], but for when there were real
+    alternatives to weigh - explains WHY the winner beat them (sooner vs.
+    more reliable), not just what the winner's own number is. Falls back to
+    [phrase_recommendation] (no alternatives to discuss) when the list is
+    empty, and to the same template fallback on any LLM failure - same
+    fail-soft reasoning as phrase_recommendation's docstring.
+    """
+    if not alternatives:
+        return phrase_recommendation(winner)
+
+    if not settings.groq_api_key:
+        return _template_comparison_phrase(winner, alternatives)
+
+    client = OpenAI(
+        api_key=settings.groq_api_key,
+        base_url="https://api.groq.com/openai/v1",
+    )
+
+    def _payload(route: RankedRoute) -> dict:
+        return {
+            "mode": route.mode,
+            "label": route.label,
+            "predicted_arrival": route.predicted_arrival.isoformat(),
+            "confidence": round(route.confidence, 2),
+        }
+
+    payload = {
+        "winner": _payload(winner),
+        "alternatives": [_payload(r) for r in alternatives],
+    }
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.groq_model,
+            temperature=0.2,
+            max_tokens=120,
+            messages=[
+                {"role": "system", "content": _COMPARISON_SYSTEM_PROMPT},
+                {"role": "user", "content": str(payload)},
+            ],
+        )
+        text = response.choices[0].message.content
+        return text.strip() if text else _template_comparison_phrase(winner, alternatives)
+    except OpenAIError:
+        return _template_comparison_phrase(winner, alternatives)
+
+
+def _template_comparison_phrase(winner: RankedRoute, alternatives: list[RankedRoute]) -> str:
+    time_str = winner.predicted_arrival.strftime("%I:%M %p").lstrip("0")
+    hedge = "should" if winner.confidence >= 0.6 else "might"
+    runner_up = alternatives[0]
+    if winner.predicted_arrival < runner_up.predicted_arrival:
+        reason = f"sooner than your {runner_up.label}"
+    else:
+        reason = f"more reliable right now than your {runner_up.label}"
+    return f"Your {winner.label} {hedge} arrive around {time_str} - {reason}."

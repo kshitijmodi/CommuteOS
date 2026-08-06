@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../account/recommendation_card.dart';
+import '../account/recommendation_repository.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
 import '../transit/natural_sort.dart';
@@ -22,14 +24,26 @@ class FavoritesScreen extends StatefulWidget {
 class _FavoritesScreenState extends State<FavoritesScreen> {
   final _stationDirectory = StationDirectory();
   final _favoritesRepository = FavoritesRepository();
+  final _recommendationRepository = RecommendationRepository();
   late Future<List<TransitStation>> _stationsFuture;
   Set<String> _favoriteKeys = {};
+
+  // Null while still loading or when there's genuinely nothing to show
+  // (home/office not confirmed yet, or not resolvable to a live candidate -
+  // see RecommendationRepository.getRecommendationFromHomeOffice's docs) -
+  // the card is simply omitted in that case rather than showing an error,
+  // since a user who hasn't set up home/office yet shouldn't see a failure
+  // for a feature they haven't opted into.
+  Future<Recommendation?>? _recommendationFuture;
 
   @override
   void initState() {
     super.initState();
     _stationsFuture = _stationDirectory.loadAllStations();
     _loadFavorites();
+    _recommendationFuture = _recommendationRepository
+        .getRecommendationFromHomeOffice()
+        .catchError((_) => null);
     // Favoriting/unfavoriting from the separate bottom-nav Search tab (a
     // persistent sibling widget, not something pushed on top of this one -
     // see root_shell.dart) doesn't touch this screen's state at all by
@@ -98,31 +112,47 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                   .toList()
                 ..sort((a, b) => compareStationNames(a.name, b.name));
 
-          if (favorites.isEmpty) {
-            return EmptyState(
-              icon: Icons.star_border_rounded,
-              title: 'No favorite stations yet',
-              message: 'Search for a station and tap the star to add it here.',
-              action: FilledButton.icon(
-                onPressed: _openSearch,
-                icon: const Icon(Icons.search_rounded),
-                label: const Text('Search stations'),
-              ),
-            );
-          }
-
           return ListView(
             padding: const EdgeInsets.only(bottom: AppSpacing.lg),
             children: [
-              SectionHeader('Favorites · ${favorites.length}'),
-              for (final station in favorites)
-                StationListTile(
-                  group: StationGroup(name: station.name, stations: [station]),
-                  isStationFavorite: (_) => true,
-                  onStationFavoriteToggle: (s, isFav) {
-                    if (!isFav) _removeFavorite(s);
-                  },
-                ),
+              FutureBuilder<Recommendation?>(
+                future: _recommendationFuture,
+                builder: (context, snapshot) {
+                  final recommendation = snapshot.data;
+                  if (recommendation == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      0,
+                    ),
+                    child: RecommendationCard(recommendation: recommendation),
+                  );
+                },
+              ),
+              if (favorites.isEmpty)
+                EmptyState(
+                  icon: Icons.star_border_rounded,
+                  title: 'No favorite stations yet',
+                  message: 'Search for a station and tap the star to add it here.',
+                  action: FilledButton.icon(
+                    onPressed: _openSearch,
+                    icon: const Icon(Icons.search_rounded),
+                    label: const Text('Search stations'),
+                  ),
+                )
+              else ...[
+                SectionHeader('Favorites · ${favorites.length}'),
+                for (final station in favorites)
+                  StationListTile(
+                    group: StationGroup(name: station.name, stations: [station]),
+                    isStationFavorite: (_) => true,
+                    onStationFavoriteToggle: (s, isFav) {
+                      if (!isFav) _removeFavorite(s);
+                    },
+                  ),
+              ],
             ],
           );
         },
