@@ -8,8 +8,10 @@ import 'njt_bus_stop.dart';
 
 /// A same-named stop_id's own routes plus real coordinates, needed to tell
 /// a genuine multi-bay terminal apart from unrelated stops that just
-/// happen to share a name - see [_isSingleTerminal].
-typedef _Bay = (String stopId, List<String> routes, double lat, double lon);
+/// happen to share a name - see [_isSingleTerminal]. [toward] is the
+/// best-effort "toward `<terminus>`" hint from the bundled CSV - only ever
+/// used when this bay ends up unmerged (see [NjtBusStop.toward]'s docs).
+typedef _Bay = (String stopId, List<String> routes, double lat, double lon, String toward);
 
 /// Loads and caches the bundled NJT bus stop list
 /// (assets/data/njt_bus_stops.csv, built from NJT's static GTFS bus feed,
@@ -43,6 +45,7 @@ class NjtBusStopRepository {
     final latCol = header.indexOf('lat');
     final lonCol = header.indexOf('lon');
     final routesCol = header.indexOf('routes');
+    final towardCol = header.indexOf('toward');
 
     // Grouped by name first, not appended directly to a flat list - large
     // terminals (Journal Square, Irvington Bus Terminal, Secaucus Junction
@@ -83,7 +86,10 @@ class NjtBusStopRepository {
 
       final lat = double.tryParse(row[latCol].toString()) ?? 0;
       final lon = double.tryParse(row[lonCol].toString()) ?? 0;
-      byName.putIfAbsent(row[nameCol].toString(), () => []).add((stopId, routeNames, lat, lon));
+      final toward = towardCol == -1 ? '' : row[towardCol].toString();
+      byName
+          .putIfAbsent(row[nameCol].toString(), () => [])
+          .add((stopId, routeNames, lat, lon, toward));
     }
 
     final stops = <NjtBusStop>[
@@ -97,7 +103,12 @@ class NjtBusStopRepository {
           )
         else
           for (final bay in entry.value)
-            NjtBusStop(stopId: bay.$1, name: entry.key, routeNames: bay.$2..sort()),
+            NjtBusStop(
+              stopId: bay.$1,
+              name: entry.key,
+              routeNames: bay.$2..sort(),
+              toward: bay.$5.isEmpty ? null : bay.$5,
+            ),
     ];
 
     stops.sort((a, b) => compareStationNames(a.name, b.name));

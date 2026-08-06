@@ -15,6 +15,7 @@ class NjtBusStop implements TransitStation {
     required this.stopId,
     required this.name,
     required this.routeNames,
+    this.toward,
     List<String>? mergedStopIds,
   }) : mergedStopIds = mergedStopIds ?? const [];
 
@@ -33,6 +34,18 @@ class NjtBusStop implements TransitStation {
   /// trip (looked up backend-side from trip_id, since NJT's real-time
   /// feed leaves route_id empty - see backend/app/transit/njt_bus.py).
   final List<String> routeNames;
+
+  /// Best-effort "toward `<terminus>`" hint (e.g. "Newark"), null when there
+  /// wasn't a confident one to derive (see build_njt_bus_stops.py's
+  /// _toward_by_stop_id). Only meaningful - and only ever populated - for
+  /// an ordinary unmerged stop; a merged multi-bay terminal's arrivals
+  /// already cover every direction together, so it has no single "toward"
+  /// to show. Exists specifically so two same-named, unmerged stop_ids
+  /// (e.g. two stops on opposite sides of an intersection, serving
+  /// opposite directions of the same route - a real case found via phone
+  /// testing at "1st Ave at Aldene Rd") read as distinguishable options in
+  /// the station picker instead of two identical-looking rows.
+  final String? toward;
 
   /// Every bay-level stop_id folded into this entry, when NJT's static
   /// GTFS models one physical terminal as several separate stop_ids

@@ -128,4 +128,49 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'unmerged same-named stops get a real "toward" hint so they read as distinguishable',
+    (tester) async {
+      // Follow-up to the far-apart-stops fix above: once the two "1ST AVE
+      // AT ALDENE RD" stop_ids stopped being wrongly merged, the station
+      // picker showed two rows with identical route chips and identical
+      // area text ("NJ") - visibly duplicated with no way to tell which
+      // one a rider actually wants. Route 59's real route_long_name is
+      // "Plainfield - Newark" (GTFS's <dir0 terminus> - <dir1 terminus>
+      // convention); stop 14573 serves direction 1 (toward Newark) and
+      // 14582 serves direction 0 (toward Plainfield) - confirmed against
+      // NJT's real static GTFS bus feed.
+      final repository = NjtBusStopRepository();
+
+      late List stops;
+      await tester.runAsync(() async {
+        stops = await repository.loadStations();
+      });
+
+      final aldeneById = {
+        for (final s in stops.where((s) => s.name == '1ST AVE AT ALDENE RD')) s.stopId: s,
+      };
+
+      expect(aldeneById['14573']!.toward, 'Newark');
+      expect(aldeneById['14582']!.toward, 'Plainfield');
+    },
+  );
+
+  testWidgets('a merged terminal has no "toward" hint (it covers every direction)', (
+    tester,
+  ) async {
+    final repository = NjtBusStopRepository();
+
+    late List stops;
+    await tester.runAsync(() async {
+      stops = await repository.loadStations();
+    });
+
+    final journalSquare = stops.firstWhere(
+      (s) => s.name == 'JOURNAL SQUARE TRANSPORTATION CENTER',
+    );
+
+    expect(journalSquare.toward, isNull);
+  });
 }

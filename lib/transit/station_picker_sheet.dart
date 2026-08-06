@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../design/components.dart';
 import '../design/theme.dart';
+import '../njt/njt_bus_stop.dart';
 import 'station_group.dart';
 import 'transit_models.dart';
 
@@ -158,6 +159,15 @@ class _StationRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // NjtBusStop.area is just the fixed literal "NJ" - useless for telling
+    // apart two same-named, unmerged stops (e.g. opposite-direction stops
+    // on either side of an intersection - see NjtBusStop.toward's docs), so
+    // show the real "toward <terminus>" hint there instead when one exists.
+    final station = this.station;
+    final subtitle = station is NjtBusStop && station.toward != null
+        ? 'Toward ${station.toward}'
+        : station.area;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -185,7 +195,7 @@ class _StationRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      station.area,
+                      subtitle,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
