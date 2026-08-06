@@ -18,8 +18,12 @@ class NjtBusService implements TransitService {
   /// The Render backend this proxies through can take a while to wake up
   /// from an idle cold-start (free tier) - without an explicit timeout, a
   /// stalled request never resolves, which surfaces in the UI as an
-  /// indefinite loading spinner rather than a retryable error.
-  static const _requestTimeout = Duration(seconds: 20);
+  /// indefinite loading spinner rather than a retryable error. 60s (not the
+  /// original 20s) because a real cold start reliably took longer than 20s
+  /// in practice - the old, shorter timeout meant a genuinely-in-progress
+  /// wakeup got reported as a hard error, right before the next 30s poll
+  /// found the now-awake backend and arrivals suddenly appeared.
+  static const _requestTimeout = Duration(seconds: 60);
 
   @override
   Future<TransitArrivalsResult> getArrivals(TransitStation station) async {

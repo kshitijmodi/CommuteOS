@@ -512,15 +512,38 @@ class MinutesAway extends StatelessWidget {
 /// of a bare CircularProgressIndicator so every screen's loading state
 /// looks identical.
 class AppLoader extends StatelessWidget {
-  const AppLoader({super.key});
+  const AppLoader({super.key, this.message});
+
+  /// Optional caption shown below the spinner - e.g. explaining a load
+  /// that's expected to take unusually long (NJT rail/bus's Render backend
+  /// cold-starting after being idle), so a slow load reads as expected
+  /// rather than the app looking stuck or broken.
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: SizedBox(
-        width: 28,
-        height: 28,
-        child: CircularProgressIndicator(strokeWidth: 2.5),
+    final message = this.message;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+          if (message != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

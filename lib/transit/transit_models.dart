@@ -93,6 +93,31 @@ class TransitArrival {
   Duration get timeUntilArrival => arrivalTime.difference(DateTime.now());
 }
 
+/// Drops arrivals that have already passed from every direction, keeping a
+/// small grace window so a train/bus genuinely arriving "now" (a few
+/// seconds of clock/feed skew either way) doesn't flicker out right as it
+/// shows. Without this, a feed that still reports an already-departed trip
+/// (seen in practice on NJT bus - a stale stop_time_update from earlier in
+/// the trip lingering in the feed) displays as "NOW" indefinitely, since
+/// MinutesAway collapses any non-positive countdown to that label - a
+/// bus that left 45 minutes ago is indistinguishable from one arriving
+/// this second. Applied once, right where a fetch result first comes in,
+/// so every consumer (direction tabs, destination grouping, the
+/// empty-result check) only ever sees genuinely upcoming arrivals.
+TransitArrivalsResult dropPastArrivals(TransitArrivalsResult result) {
+  const grace = Duration(minutes: -1);
+  return TransitArrivalsResult(
+    arrivalsByDirectionKey: {
+      for (final entry in result.arrivalsByDirectionKey.entries)
+        entry.key: [
+          for (final arrival in entry.value)
+            if (arrival.timeUntilArrival > grace) arrival,
+        ],
+    },
+    isLive: result.isLive,
+  );
+}
+
 /// Result of fetching arrivals for a station: per-direction arrival lists,
 /// plus whether the data should be trusted as live.
 ///

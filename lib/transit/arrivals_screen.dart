@@ -63,7 +63,8 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   void _refresh() {
     _service
         .getArrivals(widget.station)
-        .then((result) {
+        .then((rawResult) {
+          final result = dropPastArrivals(rawResult);
           _logTripOnce(result);
           if (!mounted) return;
 
@@ -178,13 +179,17 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 
     if (result == null) {
       if (_initialLoadError != null) {
-        return _messageList(
-          Icons.wifi_off_rounded,
-          'Live data unavailable',
-          '$_initialLoadError',
-        );
+        return _errorState();
       }
-      return const AppLoader();
+      // NJT rail/bus are the only two agencies proxied through our own
+      // backend (see the class doc) - a free-tier Render service that's
+      // been idle can take up to a minute to wake up on the first request,
+      // which otherwise reads as the app being stuck rather than a known,
+      // expected wait.
+      final isNjt = widget.station.agency == Agency.njtRail || widget.station.agency == Agency.njtBus;
+      return AppLoader(
+        message: isNjt ? 'Waking up the server — this can take up to a minute.' : null,
+      );
     }
 
     if (directions.isEmpty) {
@@ -268,6 +273,26 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 
   Widget _messageList(IconData icon, String title, String message) {
     return EmptyState(icon: icon, title: title, message: message);
+  }
+
+  /// Shown when the very first load fails outright (see [_lastGoodResult]/
+  /// [_initialLoadError]'s docs) - unlike a background-refresh failure,
+  /// there's no data on screen to fall back to, so this needs its own way
+  /// forward rather than just waiting for the next 30s poll. Most likely
+  /// cause for NJT rail/bus is the 60s cold-start timeout itself expiring
+  /// (see NjtBusService/NjtRailService's docs) - retrying immediately after
+  /// the backend has already started waking up from the first attempt
+  /// should succeed much faster than waiting a fresh cold start out again.
+  Widget _errorState() {
+    return EmptyState(
+      icon: Icons.wifi_off_rounded,
+      title: 'Live data unavailable',
+      message: '$_initialLoadError',
+      action: OutlinedButton(
+        onPressed: _refresh,
+        child: const Text('Retry'),
+      ),
+    );
   }
 }
 

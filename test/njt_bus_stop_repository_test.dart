@@ -91,4 +91,41 @@ void main() {
     expect(esplanade.mergedStopIds, isEmpty);
     expect(esplanade.allStopIds, ['1941']);
   });
+
+  testWidgets(
+    'does not merge two same-named stops that are actually far apart',
+    (tester) async {
+      // Regression test for a real bug reported from the phone: "1ST AVE AT
+      // ALDENE RD" has two stop_ids (14573, 14582) in NJT's static GTFS
+      // sharing this exact name, but they're ~113m apart - almost certainly
+      // opposite-direction stops on either side of the intersection, not
+      // bays of one terminal. The old merge-by-name-alone logic folded them
+      // into one NjtBusStop, so a single arrivals fetch mixed both
+      // directions' route 59 buses into one list - route 59 showed up to 7
+      // times, several already past their arrival time. Confirmed via a
+      // dataset-wide scan that this is not a one-off: 209 of 1,309
+      // same-named stop_id groups are actually >60m apart. Fixed by only
+      // merging same-named stop_ids within a real terminal's radius; stops
+      // that fail that check now load as separate NjtBusStops sharing a
+      // name, so StationGroup's existing collision picker handles them
+      // instead of a silent, incorrect merge.
+      final repository = NjtBusStopRepository();
+
+      late List stops;
+      await tester.runAsync(() async {
+        stops = await repository.loadStations();
+      });
+
+      final aldeneEntries = stops.where((s) => s.name == '1ST AVE AT ALDENE RD').toList();
+
+      expect(aldeneEntries, hasLength(2));
+      for (final stop in aldeneEntries) {
+        expect(stop.mergedStopIds, isEmpty);
+      }
+      expect(
+        aldeneEntries.map((s) => s.stopId).toSet(),
+        {'14573', '14582'},
+      );
+    },
+  );
 }

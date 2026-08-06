@@ -23,7 +23,8 @@ class NjtRailService implements TransitService {
   /// See NjtBusService's docstring on the same constant - the Render
   /// backend this proxies through can cold-start-stall on an idle request,
   /// and without a timeout that surfaces as an indefinite loading spinner.
-  static const _requestTimeout = Duration(seconds: 20);
+  /// 60s, not 20s - a real cold start reliably took longer than 20s.
+  static const _requestTimeout = Duration(seconds: 60);
 
   @override
   Future<TransitArrivalsResult> getArrivals(TransitStation station) async {
