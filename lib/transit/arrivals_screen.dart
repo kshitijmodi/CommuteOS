@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../account/trip_logger.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
+import '../lirr/lirr_service.dart';
 import '../mta/mta_service.dart';
 import '../njt/njt_bus_service.dart';
 import '../njt/njt_rail_service.dart';
@@ -34,6 +35,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     Agency.path => PathService(),
     Agency.njtRail => NjtRailService(),
     Agency.njtBus => NjtBusService(),
+    Agency.lirr => LirrService(),
   };
   final _tripLogger = TripLogger();
   Timer? _timer;
@@ -279,13 +281,17 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
 /// MTA needs a route ID here (its arrivals carry one per entry); PATH
 /// needs a direction key instead (its arrivals don't distinguish routes
 /// the same way) — see RecommendationCandidate's docs for the same split.
-/// NJT rail/bus need neither (a station code alone is enough to fetch
-/// arrivals there), so this returns null for both rather than logging a
-/// value nothing will ever use.
+/// NJT rail/bus/LIRR need neither (a station code alone is enough to fetch
+/// arrivals there), so this returns null for all three rather than logging
+/// a value nothing will ever use.
 String? soonestRouteOrDirectionForTripLog(Agency agency, TransitArrivalsResult result) {
   switch (agency) {
     case Agency.njtRail:
     case Agency.njtBus:
+    case Agency.lirr:
+      // A station code alone is enough to fetch LIRR arrivals (see
+      // LirrService) - same reasoning as NJT rail/bus, no route/direction
+      // filter needed the way MTA/PATH need one.
       return null;
     case Agency.path:
       String? soonestDirectionKey;

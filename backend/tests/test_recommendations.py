@@ -49,6 +49,14 @@ def mock_transit_fetchers(monkeypatch):
             is_live=True,
         )
 
+    async def fake_lirr_arrivals(station_code):
+        return ArrivalsResult(
+            arrivals=[
+                Arrival(route_label="Babylon Branch", arrival_time=now + timedelta(minutes=30))
+            ],
+            is_live=True,
+        )
+
     monkeypatch.setattr(
         "app.recommendation_builder.mta.get_arrivals", fake_mta_arrivals
     )
@@ -60,6 +68,9 @@ def mock_transit_fetchers(monkeypatch):
     )
     monkeypatch.setattr(
         "app.recommendation_builder.njt_rail.get_arrivals", fake_njt_rail_arrivals
+    )
+    monkeypatch.setattr(
+        "app.recommendation_builder.lirr.get_arrivals", fake_lirr_arrivals
     )
 
 
@@ -156,6 +167,29 @@ def test_recommendation_supports_njt_bus_candidate(client):
     body = response.json()
     assert body["mode"] == "njt_bus"
     assert body["label"] == "163 bus"
+
+
+def test_recommendation_supports_lirr_candidate(client):
+    token = _signup_and_login(client, email="lirr@example.com")
+
+    response = client.post(
+        "/recommendations",
+        json={
+            "candidates": [
+                {
+                    "agency": "lirr",
+                    "label": "Jamaica",
+                    "stop_or_station": "JAM",
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "lirr"
+    assert body["label"] == "Jamaica"
 
 
 def test_recommendation_logs_a_trip(client, db_session):

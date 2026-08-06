@@ -19,12 +19,12 @@ class CandidateRequest(BaseModel):
     doesn't discover routes itself, see decision_engine.py's docstring.
     """
 
-    agency: Literal["mta", "path", "njt_rail", "njt_bus"]
+    agency: Literal["mta", "path", "njt_rail", "njt_bus", "lirr"]
     label: str
     # MTA: GTFS stop_id (e.g. "R20N") + route_id (e.g. "N").
     # PATH: station code (e.g. "JSQ") + direction ("ToNY"/"ToNJ").
-    # NJT rail/bus: station/stop_id + route_or_direction unused (both
-    # return every line at the stop in one call; there's no separate
+    # NJT rail/bus/LIRR: station/stop code + route_or_direction unused (all
+    # three return every line at the stop in one call; there's no separate
     # direction/route filter the way MTA/PATH need).
     stop_or_station: str
     route_or_direction: str = ""

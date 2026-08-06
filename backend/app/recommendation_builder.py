@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .decision_engine import RankedRoute, RouteCandidate, rank_routes
 from .llm_phrasing import phrase_recommendation
 from .models import Trip, User
-from .transit import mta, njt_bus, njt_rail, path
+from .transit import lirr, mta, njt_bus, njt_rail, path
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class CandidateSpec:
     doesn't depend on the router's Pydantic models.
     """
 
-    agency: str  # "mta" | "path" | "njt_rail" | "njt_bus"
+    agency: str  # "mta" | "path" | "njt_rail" | "njt_bus" | "lirr"
     label: str
     stop_or_station: str
     route_or_direction: str = ""
@@ -86,6 +86,8 @@ async def fetch_candidates(specs: list[CandidateSpec]) -> list[RouteCandidate]:
             result = await path.get_arrivals(spec.stop_or_station, spec.route_or_direction)
         elif spec.agency == "njt_rail":
             result = await njt_rail.get_arrivals(spec.stop_or_station)
+        elif spec.agency == "lirr":
+            result = await lirr.get_arrivals(spec.stop_or_station)
         else:
             result = await njt_bus.get_arrivals(spec.stop_or_station)
         candidates.append(RouteCandidate(mode=spec.agency, label=spec.label, arrivals=result))

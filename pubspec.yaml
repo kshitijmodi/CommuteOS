@@ -57,6 +57,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # Only used directly in test/lirr_service_test.dart to build a fake
+  # GTFS-RT feed's Int64 `time` field - already a transitive dependency
+  # via gtfs_realtime_bindings, declared explicitly since analyze flags
+  # relying on a transitive-only package as fragile.
+  fixnum: ^1.1.1
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -88,6 +94,8 @@ flutter:
     - assets/data/mta_stations.csv
     - assets/data/njt_rail_stations.csv
     - assets/data/njt_bus_stops.csv
+    - assets/data/lirr_stations.csv
+    - assets/data/lirr_trip_routes.csv
     - assets/icon/icon_master.png
 
   # An image asset can refer to one or more resolution-specific "variants", see

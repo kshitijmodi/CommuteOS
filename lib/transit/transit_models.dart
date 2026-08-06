@@ -5,7 +5,7 @@
 /// PATH station codes, feed lookup tables) stay inside that agency's module.
 library;
 
-enum Agency { mta, path, njtRail, njtBus }
+enum Agency { mta, path, njtRail, njtBus, lirr }
 
 /// Dart's Agency.name is camelCase (e.g. "njtRail"), but the backend's
 /// mode/agency fields (Trip.mode, CandidateRequest.agency) are snake_case
@@ -20,6 +20,7 @@ const Map<Agency, String> _agencyWireNames = {
   Agency.path: 'path',
   Agency.njtRail: 'njt_rail',
   Agency.njtBus: 'njt_bus',
+  Agency.lirr: 'lirr',
 };
 
 String wireAgencyName(Agency agency) => _agencyWireNames[agency]!;

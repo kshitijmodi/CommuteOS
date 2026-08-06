@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
 import '../favorites/favorites_repository.dart';
+import '../lirr/lirr_station.dart';
 import '../mta/mta_station.dart';
 import '../njt/njt_bus_stop.dart';
 import '../njt/njt_rail_station.dart';
@@ -72,8 +73,8 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
 
   /// A single default route/direction per station for this first version -
   /// see the class doc for why this doesn't yet let the user pick among a
-  /// station's multiple routes. NJT rail/bus have no route/direction to
-  /// pick - one call returns every line at the stop - so it's always "".
+  /// station's multiple routes. NJT rail/bus/LIRR have no route/direction
+  /// to pick - one call returns every line at the stop - so it's always "".
   String? _defaultRouteOrDirection(TransitStation station) {
     if (station is MtaStation) {
       return station.routes.isNotEmpty ? station.routes.first : null;
@@ -83,7 +84,7 @@ class _RecommendationScreenState extends State<RecommendationScreen> {
           ? station.directions.first.key
           : null;
     }
-    if (station is NjtRailStation || station is NjtBusStop) {
+    if (station is NjtRailStation || station is NjtBusStop || station is LirrStation) {
       return '';
     }
     return null;

@@ -12,6 +12,10 @@ Color agencyColor(Agency agency) => switch (agency) {
   Agency.path => const Color(0xFFE8794D),
   Agency.njtRail => const Color(0xFF9B5DE0),
   Agency.njtBus => const Color(0xFF5DBE8A),
+  // LIRR has no single official "brand color" the way subway lines do -
+  // this is a deep indigo/navy distinct from the other four agencies'
+  // colors, in the same family MTA's own LIRR signage/marketing uses.
+  Agency.lirr => const Color(0xFF3D4B94),
 };
 
 String agencyLabel(Agency agency) => switch (agency) {
@@ -19,6 +23,7 @@ String agencyLabel(Agency agency) => switch (agency) {
   Agency.path => 'PATH',
   Agency.njtRail => 'NJT',
   Agency.njtBus => 'NJT Bus',
+  Agency.lirr => 'LIRR',
 };
 
 /// Distinct from [agencyLabel] - "NJT" alone is fine for a single-agency
@@ -31,6 +36,7 @@ String agencyFilterLabel(Agency agency) => switch (agency) {
   Agency.path => 'PATH',
   Agency.njtRail => 'NJT Rail',
   Agency.njtBus => 'NJT Bus',
+  Agency.lirr => 'LIRR',
 };
 
 /// Formats an arrival's absolute time as 12-hour clock time, e.g. "5:24 PM".
@@ -101,12 +107,35 @@ const Map<String, Color> _njtRailLineColors = {
   'MRL': Color(0xFFC1AA72),
 };
 
+/// The MTA's own published LIRR branch colors (from LIRR's static GTFS
+/// feed's routes.txt route_color field - see
+/// backend/scripts/build_lirr_stations.py), keyed by the branch's full
+/// name (route_long_name, e.g. "Babylon Branch") since LIRR's real-time
+/// feed identifies a trip's route the same way the static feed does (no
+/// separate short-code system the way NJT rail's LINECODE is).
+const Map<String, Color> _lirrBranchColors = {
+  'Babylon Branch': Color(0xFF00985F),
+  'Hempstead Branch': Color(0xFFCE8E00),
+  'Oyster Bay Branch': Color(0xFF00AF3F),
+  'Ronkonkoma Branch': Color(0xFFA626AA),
+  'Montauk Branch': Color(0xFF00B2A9),
+  'Long Beach Branch': Color(0xFFFF6319),
+  'Far Rockaway Branch': Color(0xFF6E3219),
+  'West Hempstead Branch': Color(0xFF00A1DE),
+  'Port Washington Branch': Color(0xFFC60C30),
+  'Port Jefferson Branch': Color(0xFF006EC7),
+  'Belmont Park': Color(0xFF60269E),
+  'City Terminal Zone': Color(0xFF4D5357),
+  'Greenport Service': Color(0xFFA626AA),
+};
+
 /// A route's real display color: NYCT's published color for an MTA route
-/// ID, the feed-provided hex color(s) for a PATH arrival, or NJT's
-/// published rail line color. Falls back to the agency's generic badge
-/// color if no real color is known (e.g. an unrecognized MTA route ID, a
-/// PATH arrival missing/malformed lineColor data, or an NJT LINECODE this
-/// table doesn't have - like Amtrak trains sharing NJT's tracks).
+/// ID, the feed-provided hex color(s) for a PATH arrival, NJT's published
+/// rail line color, or LIRR's published branch color. Falls back to the
+/// agency's generic badge color if no real color is known (e.g. an
+/// unrecognized MTA route ID, a PATH arrival missing/malformed lineColor
+/// data, or an NJT LINECODE this table doesn't have - like Amtrak trains
+/// sharing NJT's tracks).
 Color routeColor({
   required Agency agency,
   required String routeLabel,
@@ -118,6 +147,9 @@ Color routeColor({
   }
   if (agency == Agency.njtRail) {
     return _njtRailLineColors[routeLabel] ?? agencyColor(agency);
+  }
+  if (agency == Agency.lirr) {
+    return _lirrBranchColors[routeLabel] ?? agencyColor(agency);
   }
   return _mtaRouteColors[routeLabel] ?? agencyColor(agency);
 }
