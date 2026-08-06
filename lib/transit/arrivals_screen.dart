@@ -8,6 +8,7 @@ import '../design/theme.dart';
 import '../lirr/lirr_service.dart';
 import '../mta/mta_service.dart';
 import '../njt/njt_bus_service.dart';
+import '../njt/njt_bus_stop.dart';
 import '../njt/njt_rail_service.dart';
 import '../path/path_service.dart';
 import 'transit_models.dart';
@@ -133,6 +134,16 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     final directions = widget.station.directions;
     final tabCount = directions.isEmpty ? 1 : directions.length;
 
+    // NjtBusStop.area is just the fixed literal "NJ" - real direction info
+    // (when there is any - see NjtBusStop.toward's docs) is more useful
+    // here, especially once the user has already picked a specific
+    // direction from the station picker (which shows this same hint) -
+    // without it, the direction they just chose vanishes on this screen.
+    final station = widget.station;
+    final subtitle = station is NjtBusStop && station.toward != null
+        ? 'Toward ${station.toward}'
+        : station.area;
+
     return DefaultTabController(
       length: tabCount,
       child: Scaffold(
@@ -151,7 +162,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    widget.station.area,
+                    subtitle,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
