@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import (
     auth,
     behavior,
+    chat,
     home_office,
     internal,
     preferences,
@@ -33,6 +34,7 @@ app.include_router(recommendations.router)
 app.include_router(trip_outcomes.router)
 app.include_router(home_office.router)
 app.include_router(behavior.router)
+app.include_router(chat.router)
 app.include_router(transit.router)
 app.include_router(internal.router)
 
