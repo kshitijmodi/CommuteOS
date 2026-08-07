@@ -8,9 +8,9 @@ Full product rationale lives in [`CommuteOS PRD.txt`](./CommuteOS%20PRD.txt). Op
 
 ## Current phase
 
-**Phase 1 — Real-Time Multi-Agency Transit Intelligence** (done: MTA, PATH, NJ Transit rail + bus, and LIRR all live). **Phase 2 — Personal Commute Memory** (done: learned preferences, nightly-job stand-in). **Phase 3 — AI Commute Agent** (done: deterministic decision engine, LLM phrasing, recommendation tracking).
+**Phase 1 — Real-Time Multi-Agency Transit Intelligence** (done: MTA, PATH, NJ Transit rail + bus, and LIRR all live). **Phase 2 — Personal Commute Memory** (done: learned preferences, nightly-job stand-in). **Phase 3 — Four Named AI Features** (re-scoped 2026-08-07 into **Behavior AI**, **Commute AI**, **Schedule AI**, **Chat AI** — see the PRD's Phase 3 for the full plan; a first version of the single-recommendation-engine pattern that Commute AI now generalizes is live, the other three are not yet built).
 
-All three phases have working code end-to-end as of this rapid-build round — this does NOT mean Phase 1's real exit criteria are met (two weeks of daily personal use hasn't happened) or Phase 3's cold-start requirement is satisfied (no real 2-week trip history exists yet, only a synthetic demo seed - see `backend/app/jobs/seed_demo_trips.py`). "Built" and "validated against real usage" are different claims; see `OPEN_QUESTIONS.md` for what's still genuinely open.
+All work below reflects what's actually shipped as of this rapid-build round — this does NOT mean Phase 1's real exit criteria are met (two weeks of daily personal use hasn't happened) or Phase 3's cold-start requirement is satisfied (no real 2-week trip history exists yet, only a synthetic demo seed - see `backend/app/jobs/seed_demo_trips.py`). "Built" and "validated against real usage" are different claims; see `OPEN_QUESTIONS.md` for what's still genuinely open.
 
 ## Status
 

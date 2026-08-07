@@ -66,22 +66,41 @@ Android App -> FastAPI Backend -> PostgreSQL (trips, preferences) -> Nightly bat
 
 Exit criteria: the app can state, in plain data (not yet AI-phrased), "this user prefers reliability over speed, tolerates 0.3mi walks, prefers direct routes" — demonstrably derived from real usage, not defaults.
 
-### Phase 3 — AI Commute Agent
-Goal: Proactive, personalized, correctly-hedged recommendations.
+### Phase 3 — Four Named AI Features
+Goal: Move from one generic "recommendation engine" to four distinct, purpose-built AI features that map onto the actual phases of a commuter's journey — each with its own trigger, its own job, and a shared brain underneath so they can never contradict each other.
 
-Decision engine (deterministic, not LLM):
-Input: live delay data (all modes) + user's preference scores + today's calendar end-time (optional, stretch)
-Output: ranked list of {mode, depart_by_time, predicted_arrival, confidence}
-Rules/weighted-scoring based — e.g., a route's score = predicted_arrival_time − (reliability_weight × recent_delay_variance). Explainable, fast, cheap to run on every notification trigger.
+The four features:
 
-LLM's job — narrow and specific: take the engine's output and phrase it naturally, e.g. turning {mode: NJT, depart_by: 8:05, confidence: 0.82} into "Your usual PATH has a 12-min delay. NJ Transit's currently faster — leave by 8:05 to make your 8:45." Low-temperature, strict-system-prompt generation, fed only the engine's structured output — never given raw trip history to reason over freely, avoiding the highest-risk hallucination: inventing a departure time.
+**Behavior AI** (foundation — not user-facing)
+Learns from real usage rather than asking the user to configure anything. Three distinct signals, captured passively from existing app activity (viewing arrivals, favoriting, trip-logging — no new explicit action required):
+- Feed accuracy: predicted vs. actual arrival time, per route/station/time-of-day — validates the *data source*.
+- Route/direction choice: which direction or vehicle a user actually took, per station and time — validates *what to recommend this specific person*, not just "was the feed right."
+- Personal timing buffer: how long before a train's predicted arrival this user actually starts moving.
+Everything else in Phase 3 reads from this — it has to exist first, or Commute AI/Schedule AI/Chat AI's personalized half are just guesses with no data behind them.
 
-Trust-preserving design choices:
-- Always show the underlying delay number, not just the recommendation
-- Track was_recommendation_followed and actual_arrival so the app can honestly report its own accuracy over time
-- Confidence framing in language calibrated to the engine's actual confidence score, not overstated
+**Commute AI** (routing decisions, in the moment)
+Fires when the user opens a multi-option hub station (e.g. Journal Square) — a location-triggered, in-app event, not GPS. Infers the likely direction/destination from Behavior AI's history at that station and time, then recommends the fastest/most-reliable real option — "take bus 119 instead of your usual, it's 10 minutes faster today." Falls back to showing every direction unranked (never guesses) when there isn't enough history yet. This is the deterministic-scoring-engine-plus-narrow-LLM-phrasing pattern the original Phase 3 draft specified, generalized to be callable from more than one place (see the shared-brain note below) — a route's score is still predicted_arrival_time − (reliability_weight × recent_delay_variance), still explainable, still cheap to run per trigger. **Commute AI is the single, sole owner of "which route/mode is best right now" — no other feature re-implements this.**
 
-Exit criteria: recommendation accuracy (predicted vs. actual arrival) tracked and visible.
+**Schedule AI** (timing decisions, ahead of departure)
+Fires on a schedule, ahead of the user's usual departure window (learned from Behavior AI's timing-buffer data, not a fixed clock time), and reacts to detected disruption on the user's known routine. Says things like "leave now," "leave 15 min later — usual bus is delayed," or "usual bus is cancelled, take X instead." **Schedule AI owns only the timing question — when to leave, how much buffer, whether a disruption is even worth interrupting the user about.** When a disruption forces a route substitution, Schedule AI delegates the routing choice to Commute AI's engine rather than re-implementing route-picking — this is what guarantees the two features can never recommend different things for the same disruption. Delivered as a push notification, since this is the one feature allowed to interrupt the user unprompted.
+
+**Chat AI** (on-demand Q&A)
+A conversational interface, user-initiated only (never proactive), split into two tiers:
+- Stateless tier: answers questions using only live feed data ("what time's the next PATH train from Hoboken") — no dependency on Behavior AI, can ship independently and immediately.
+- Personalized tier: answers questions that need history ("what do I usually take from here") by reading Behavior AI's data — gated on the same dependency as Commute AI, and **must give the same answer Commute AI would give if asked the same question in card form**, since both read from the one shared brain.
+Chat AI must refuse plainly (never guess) on anything with no real answer in the data — fares, real-time crowding, anything outside the NYC-metro scope.
+
+The shared brain: Commute AI, Schedule AI (when it needs a substitution), and Chat AI's personalized tier all call into one function — "given known alternatives, which is best right now, and why" — rather than each independently implementing scoring. This is a structural guarantee of consistency, not a convention to remember: it is architecturally impossible for two of these features to disagree about which route is best, because there is only one place that decision is made. Each caller differs only in *when* it calls (scheduled check / hub arrival / chat question) and *how* it phrases the answer (push / card / conversational reply) — never in the underlying ranking logic.
+
+Trust-preserving design choices (carried forward from the original Phase 3 draft, and now shared across all four features rather than one):
+- Always show the underlying numbers, not just the recommendation — Commute AI's card lists every real alternative it compared against, not just the winner.
+- Track was_recommendation_followed and actual_arrival (feeds Behavior AI's feed-accuracy signal) so the app can honestly report its own accuracy over time.
+- Confidence framing in language calibrated to the engine's actual confidence score, never overstated.
+- The LLM's job stays narrow everywhere it appears: turn a decision a deterministic engine already made into a sentence. It is never asked to invent a number, a reason not reflected in the given data, or make the routing/timing decision itself.
+
+Build order (dependency-driven): Behavior AI first (everything reads from it) → Chat AI's stateless tier in parallel (zero dependency, ships immediately) → Schedule AI (needs Behavior AI's timing-buffer data; mostly extends the notification job that already exists) → Commute AI (needs Behavior AI's direction-choice data specifically) → Chat AI's personalized tier (same dependency as Commute AI, lands alongside it).
+
+Exit criteria: all four features are live and demonstrably reading from the same underlying scoring function — verified by confirming Commute AI and Chat AI's personalized tier give the same answer to the same routing question, and that a Schedule AI substitution never contradicts what Commute AI would have recommended at that moment. Recommendation accuracy (predicted vs. actual arrival) tracked and visible, per the original exit criterion.
 
 ## 7. Longer-Term Expansion (Phase 4+, architecture-only for now)
 Because preferences, decision engine, and delivery layer are mode-agnostic, adding a new mode (driving, bike share, flights) is "add a data source + a scoring dimension," not a rebuild. Worth one paragraph in the pitch deck, not more — over-promising the "operating system for how humans move through cities" framing before Phase 1 ships risks reading as scope-inflation.
