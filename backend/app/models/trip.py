@@ -55,6 +55,17 @@ class Trip(Base):
         Boolean, nullable=True
     )
 
+    # When the user actually started moving toward this trip's station -
+    # reported by the client the same way actual_arrival is (see
+    # routers/trip_outcomes.py). Feeds Behavior AI's "personal timing
+    # buffer" signal (how long before a train's predicted arrival this
+    # user actually leaves): buffer = predicted_arrival - left_at. Null
+    # for every trip logged before this existed, and for any trip the
+    # client never reports it for - never backfilled or guessed.
+    left_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -95,6 +95,27 @@ def test_report_outcome_updates_trip(client, db_session):
     assert trip.actual_arrival is not None
 
 
+def test_report_outcome_updates_left_at(client, db_session):
+    import uuid
+
+    from app.models import Trip
+
+    token = _signup_and_login(client, email="leftat@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    trip_id = _create_trip(client, headers)
+
+    left_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    response = client.patch(
+        f"/trips/{trip_id}/outcome",
+        json={"left_at": left_at.isoformat()},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    trip = db_session.get(Trip, uuid.UUID(trip_id))
+    assert trip.left_at is not None
+
+
 def test_accuracy_reflects_reported_outcomes(client):
     import uuid
 

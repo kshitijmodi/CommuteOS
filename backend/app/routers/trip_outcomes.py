@@ -15,6 +15,10 @@ router = APIRouter(prefix="/trips", tags=["trips"])
 class TripOutcomeUpdate(BaseModel):
     was_recommendation_followed: bool | None = None
     actual_arrival: datetime | None = None
+    # When the user actually started moving toward the station - see
+    # Trip.left_at's docstring. Reported the same way actual_arrival is:
+    # the client fills this in after the fact, whenever it knows it.
+    left_at: datetime | None = None
 
 
 @router.patch("/{trip_id}/outcome")
@@ -49,6 +53,8 @@ def report_trip_outcome(
         trip.was_recommendation_followed = payload.was_recommendation_followed
     if payload.actual_arrival is not None:
         trip.actual_arrival = payload.actual_arrival
+    if payload.left_at is not None:
+        trip.left_at = payload.left_at
 
     db.commit()
     return {"status": "updated"}
