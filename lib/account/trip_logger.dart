@@ -26,13 +26,17 @@ class TripLogger {
   /// null for NJT rail/bus, which don't need one. Failures are logged, not
   /// surfaced to the user - a missed trip log entry shouldn't interrupt
   /// someone checking arrival times.
-  Future<void> logStationView({
+  ///
+  /// Returns the new Trip's id on success, or null on failure/logged-out -
+  /// DepartureDetector uses this to know which trip a later left_at report
+  /// (see reportLeftAt) belongs to.
+  Future<String?> logStationView({
     required String mode,
     required String originStop,
     String? routeOrDirection,
   }) async {
     final token = await _authRepository.getToken();
-    if (token == null) return; // not logged in - nothing to log
+    if (token == null) return null; // not logged in - nothing to log
 
     try {
       final response = await _client.post(
@@ -53,9 +57,41 @@ class TripLogger {
           'Trip log failed: HTTP ${response.statusCode}',
           name: 'TripLogger',
         );
+        return null;
       }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return body['id'] as String?;
     } catch (e) {
       developer.log('Trip log failed: $e', name: 'TripLogger');
+      return null;
+    }
+  }
+
+  /// Reports when the user actually started moving toward [tripId]'s
+  /// station - see backend Trip.left_at's docstring. Feeds Behavior AI's
+  /// timing-buffer signal. Fire-and-forget, same failure posture as
+  /// [logStationView]: a missed report shouldn't surface to the user.
+  Future<void> reportLeftAt(String tripId, DateTime leftAt) async {
+    final token = await _authRepository.getToken();
+    if (token == null) return;
+
+    try {
+      final response = await _client.patch(
+        Uri.parse('$apiBaseUrl/trips/$tripId/outcome'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'left_at': leftAt.toUtc().toIso8601String()}),
+      );
+      if (response.statusCode != 200) {
+        developer.log(
+          'left_at report failed: HTTP ${response.statusCode}',
+          name: 'TripLogger',
+        );
+      }
+    } catch (e) {
+      developer.log('left_at report failed: $e', name: 'TripLogger');
     }
   }
 }

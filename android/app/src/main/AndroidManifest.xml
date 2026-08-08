@@ -4,6 +4,14 @@
          permissions the earlier local-scheduled-notification approach
          needed are gone now that this is server push, not a local timer. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Runtime-requestable on API 29+ (Android 10+) - required before
+         calling ActivityRecognitionClient.requestActivityTransitionUpdates
+         (see DepartureDetector / ActivityTransitionPlugin.kt). Powers
+         Behavior AI's passive timing-buffer signal (still -> walking/
+         in_vehicle detection while the app is foregrounded) - no
+         background/location permission needed, this is activity
+         classification only, not GPS. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
     <application
         android:label="CommuteOS"
         android:name="${applicationName}"
@@ -30,6 +38,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Only ever triggered via the explicit PendingIntent registered in
+             ActivityTransitionPlugin.kt, never a broadcast action string an
+             external app could guess - exported="false" as defense in depth. -->
+        <receiver
+            android:name=".ActivityTransitionReceiver"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

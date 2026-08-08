@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../account/trip_logger.dart';
+import '../behavior/departure_detector.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
 import '../lirr/lirr_service.dart';
@@ -59,6 +60,11 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     super.initState();
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
+    // Best-effort, fire-and-forget - a user viewing real arrivals for a
+    // station is exactly the moment a "started walking/driving" signal
+    // shortly after is a plausible departure, per DepartureDetector's
+    // docs. No-op if ACTIVITY_RECOGNITION permission is denied.
+    DepartureDetector.instance.start();
   }
 
   void _refresh() {
@@ -111,21 +117,40 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   /// point a real route_or_direction value can be captured. Fire-and-
   /// forget: a no-op for logged-out users (the common case today - see
   /// OPEN_QUESTIONS.md on auth being opt-in, not required to browse).
+  ///
+  /// Also registers the resulting trip id with DepartureDetector (see that
+  /// class's docs) - it's the one thing that later needs to know "which
+  /// trip does a still->walking transition, if one arrives soon, belong
+  /// to." A no-op if logStationView returned null (logged out or the
+  /// request failed) - DepartureDetector already treats "no open trip
+  /// registered" as "nothing to report against."
   void _logTripOnce(TransitArrivalsResult result) {
     if (_hasLoggedTrip) return;
     _hasLoggedTrip = true;
 
-    _tripLogger.logStationView(
-      mode: wireAgencyName(widget.station.agency),
-      originStop: widget.station.id,
-      routeOrDirection: soonestRouteOrDirectionForTripLog(widget.station.agency, result),
-    );
+    _tripLogger
+        .logStationView(
+          mode: wireAgencyName(widget.station.agency),
+          originStop: widget.station.id,
+          routeOrDirection: soonestRouteOrDirectionForTripLog(widget.station.agency, result),
+        )
+        .then((tripId) {
+          if (tripId != null) {
+            DepartureDetector.instance.registerOpenTrip(tripId);
+          }
+        });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     _service.dispose();
+    // DepartureDetector.instance deliberately keeps listening after this
+    // screen closes, not stopped here - the whole point is catching a
+    // departure that happens after the user has put the phone away, not
+    // only while this exact screen is still on-screen. It's a cheap,
+    // app-wide idempotent listener (see that class's start()) meant to run
+    // for as long as the app is foregrounded, not tied to one screen.
     super.dispose();
   }
 

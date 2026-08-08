@@ -54,4 +54,8 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // ActivityRecognitionClient/ActivityTransitionRequest - see
+    // ActivityTransitionPlugin.kt (Behavior AI's passive timing-buffer
+    // signal, still -> walking/in_vehicle detection).
+    implementation("com.google.android.gms:play-services-location:21.4.0")
 }
