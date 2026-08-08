@@ -68,6 +68,18 @@ async def test_out_of_scope_question_is_refused_plainly():
 
 
 @pytest.mark.asyncio
+async def test_nearest_to_me_question_is_refused_not_searched_as_a_station_name():
+    # Real bug found live: "what is the nearest PATH station to me" has no
+    # location to answer from, but "PATH" alone can still substring-match
+    # real station names (see test_ambiguous_toward... below) and get
+    # treated as a station-name search instead of being refused outright.
+    result = await answer_question("what is the nearest path station to me?")
+
+    assert result.station is None
+    assert "location" in result.text.lower() or "don't have that information" in result.text
+
+
+@pytest.mark.asyncio
 async def test_no_match_question_asks_for_clarification():
     result = await answer_question("what about zzz not a real place")
 
@@ -98,6 +110,21 @@ async def test_ambiguous_query_lists_real_options_without_picking_one():
 
     assert result.station is None
     assert "23 St" in result.text or "did you mean" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_options_with_a_toward_hint_are_actually_distinguishable():
+    # Real bug found live: two real, genuinely different NJT bus stops
+    # (stop_ids 15652/15653) are both literally named "PATH STATION" - the
+    # old ambiguous response listed the identical name twice with nothing
+    # to tell them apart. Both carry a real "toward" hint (Kearny / Jersey
+    # Gardens - see build_chat_station_index.py) that must actually appear
+    # in the response now, not just the bare duplicate name.
+    result = await answer_question("what time is the bus at path station")
+
+    assert result.station is None
+    assert "Kearny" in result.text
+    assert "Jersey Gardens" in result.text
 
 
 @pytest.mark.asyncio

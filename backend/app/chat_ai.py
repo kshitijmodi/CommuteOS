@@ -64,7 +64,11 @@ named. Answer using ONLY these numbers.
 - {"kind": "no_match"} - no known station matched the question. Ask the \
 user to clarify which station they mean; do not guess one.
 - {"kind": "ambiguous", "options": [...]} - more than one station could \
-match. List the real option names given and ask the user to pick one; \
+match, each with "name", "agency", and an optional "toward" (a real \
+direction hint, e.g. "Kearny" - two options can share the exact same \
+name but have different "toward" values, meaning they are genuinely \
+different real stops). List the options using the "toward" value to \
+tell them apart whenever it is present, and ask the user to pick one; \
 do not silently pick for them.
 - {"kind": "out_of_scope"} - the question is not about NYC-metro transit \
 arrival times (e.g. fares, crowding levels, weather, anything outside \
@@ -97,7 +101,17 @@ def _template_answer(context: dict) -> str:
     if kind == "no_match":
         return "I couldn't find a station matching that - could you tell me the station name?"
     if kind == "ambiguous":
-        names = ", ".join(o["name"] for o in context["options"])
+        # Append the real "toward X" hint when one exists, so two options
+        # that would otherwise render identically (e.g. two separate real
+        # NJT bus stops both literally named "PATH STATION") actually give
+        # the user something to distinguish them by - see StationMatch.
+        # toward's docstring. Falls back to plain name+agency (unchanged
+        # behavior) for options with no toward hint.
+        labels = [
+            f"{o['name']} (toward {o['toward']})" if o.get("toward") else o["name"]
+            for o in context["options"]
+        ]
+        names = ", ".join(labels)
         return f"A few stations match that - did you mean: {names}?"
 
     arrivals = context["arrivals"]
@@ -133,14 +147,28 @@ def _ask_llm(question: str, context: dict) -> str | None:
 
 def _is_out_of_scope(question: str) -> bool:
     """Cheap, explainable keyword gate for the clearest out-of-scope
-    cases (fares, crowding, weather) - deliberately not the LLM's call,
-    since asking the LLM to self-police scope is exactly the kind of
-    judgment call that can drift; a fixed list is auditable. This is a
-    narrow, additive check - it only ever adds an out-of-scope refusal,
-    never overrides a real station match found below.
+    cases (fares, crowding, weather, location-dependent "nearest to me"
+    questions - this app has no GPS/location input anywhere, see
+    OPEN_QUESTIONS.md) - deliberately not the LLM's call, since asking
+    the LLM to self-police scope is exactly the kind of judgment call
+    that can drift; a fixed list is auditable. This is a narrow,
+    additive check - it only ever adds an out-of-scope refusal, never
+    overrides a real station match found below.
+
+    "nearest"/"closest" is checked BEFORE find_stations ever runs (see
+    answer_question) specifically because a real bug shipped otherwise:
+    "what's the nearest PATH station to me" has no location to answer
+    from, but "PATH" alone can still substring-match real station names
+    (e.g. two real NJT bus stops literally named "PATH STATION") and get
+    treated as a station-name search instead of being refused - the
+    right answer here is "I don't have your location," not a guess at
+    which literal station name the question happened to contain.
     """
     lowered = question.lower()
-    out_of_scope_terms = ("fare", "cost", "price", "crowd", "weather", "ticket price")
+    out_of_scope_terms = (
+        "fare", "cost", "price", "crowd", "weather", "ticket price",
+        "nearest", "closest", "near me", "close to me",
+    )
     return any(term in lowered for term in out_of_scope_terms)
 
 
@@ -219,7 +247,9 @@ async def answer_question(
     if not _is_unambiguous(question, matches):
         context = {
             "kind": "ambiguous",
-            "options": [{"name": m.name, "agency": m.agency} for m in matches],
+            "options": [
+                {"name": m.name, "agency": m.agency, "toward": m.toward} for m in matches
+            ],
         }
         text = _ask_llm(question, context) or _template_answer(context)
         return ChatAnswer(text=text, station=None)

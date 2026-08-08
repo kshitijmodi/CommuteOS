@@ -106,3 +106,21 @@ def test_station_for_exact_agency_and_code_lookup():
 def test_station_for_returns_none_for_unknown_pair():
     assert station_for("mta", "NOT_A_REAL_STOP_ID") is None
     assert station_for("not_a_real_agency", "JSQ") is None
+
+
+def test_njt_bus_stops_carry_a_real_toward_hint_when_one_exists():
+    # Real stop_ids 15652/15653 are both named "PATH STATION" but are
+    # genuinely different stops (opposite sides of a real intersection) -
+    # their toward values are the one thing that distinguishes them.
+    kearny = station_for("njt_bus", "15652")
+    jersey_gardens = station_for("njt_bus", "15653")
+
+    assert kearny is not None and kearny.toward == "Kearny"
+    assert jersey_gardens is not None and jersey_gardens.toward == "Jersey Gardens"
+
+
+def test_stations_with_no_toward_hint_carry_none():
+    station = station_for("mta", "R01")
+
+    assert station is not None
+    assert station.toward is None

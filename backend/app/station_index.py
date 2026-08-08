@@ -42,6 +42,16 @@ class StationMatch:
     # question specifies a route); Commute AI (commute_engine.py) reads
     # this as the station's full candidate set to rank.
     routes: list[str]
+    # NJT bus only - a real "toward <terminus>" hint (same data the
+    # Flutter station picker already shows, see NjtBusStop.toward), when
+    # one exists for this stop_id. None for every other agency, and for
+    # NJT bus stops with no clear single direction (e.g. a merged multi-
+    # bay terminal). Exists so chat_ai.py can actually distinguish two
+    # real, different stops that happen to share an exact name (e.g. two
+    # separate "PATH STATION" stop_ids on opposite sides of a real
+    # intersection) instead of presenting two options that render
+    # identically - a real bug found live, see OPEN_QUESTIONS.md.
+    toward: str | None = None
 
 
 def normalize(text: str) -> str:
@@ -56,12 +66,14 @@ def _all_stations() -> list[StationMatch]:
     ) as f:
         for record in csv.DictReader(f):
             routes = [r for r in record["routes"].split("|") if r]
+            toward = record.get("toward") or None
             stations.append(
                 StationMatch(
                     name=record["name"],
                     agency=record["agency"],
                     code=record["code"],
                     routes=routes,
+                    toward=toward,
                 )
             )
     return stations

@@ -1,8 +1,8 @@
 """Builds app/data/chat_station_index.csv - a compact name -> (agency,
-code[, routes]) lookup. Originally built only for Chat AI's stateless
-tier (app/station_index.py, resolving a free-text station name into a
-real code the transit fetchers understand); now also the one place
-Commute AI (app/commute_engine.py) looks up a station's own real
+code[, routes][, toward]) lookup. Originally built only for Chat AI's
+stateless tier (app/station_index.py, resolving a free-text station name
+into a real code the transit fetchers understand); now also the one
+place Commute AI (app/commute_engine.py) looks up a station's own real
 candidate set - MTA/PATH's `routes` column doubles as "every real
 route_or_direction get_arrivals can be called with for this station,"
 which for MTA is its subway routes (e.g. "N|W") and for PATH is its two
@@ -10,6 +10,18 @@ fixed direction keys (always "ToNY|ToNJ" - see _path_rows). NJT rail/bus/
 LIRR leave this column empty since a station code alone is enough for
 those agencies' get_arrivals - there's no per-route/direction candidate
 set to enumerate.
+
+`toward` (NJT bus only) carries the same real "toward <terminus>" hint
+already built for the Flutter station picker (see
+build_njt_bus_stops.py's `toward` column and NjtBusStop.toward's docs) -
+needed because two or more real, genuinely different NJT bus stops can
+share an exact name (e.g. two separate stop_ids both literally named
+"PATH STATION", on opposite sides of a real intersection) with nothing
+else in this compact index to tell them apart. Chat AI's disambiguation
+message uses this to actually distinguish them ("PATH STATION (toward
+Kearny)" vs "PATH STATION (toward Jersey Gardens)") instead of asking
+"which one?" against two options that render identically - a real bug
+found live (see OPEN_QUESTIONS.md, 2026-08-08).
 
 Deliberately NOT a copy of any agency's full station CSV (lat/lng, ADA
 info, branch lists, etc.) - those already live in the Flutter app's
@@ -52,7 +64,7 @@ _PATH_STATIONS = [
 ]
 
 
-def _mta_rows() -> list[tuple[str, str, str, str]]:
+def _mta_rows() -> list[tuple[str, str, str, str, str]]:
     rows = []
     with open(_ASSETS / "mta_stations.csv", encoding="utf-8") as f:
         for record in csv.DictReader(f):
@@ -62,41 +74,50 @@ def _mta_rows() -> list[tuple[str, str, str, str]]:
                     "mta",
                     record["GTFS Stop ID"],
                     record["Daytime Routes"].replace(" ", "|"),
+                    "",
                 )
             )
     return rows
 
 
-def _path_rows() -> list[tuple[str, str, str, str]]:
+def _path_rows() -> list[tuple[str, str, str, str, str]]:
     # Every PATH station has the same two direction keys (see
     # PathStation.directions in path_station.dart) - a station near one
     # end of the system may only ever return live data for one of them at
     # fetch time, but that's a live-data fact discovered by calling
     # get_arrivals, not something to filter out of the candidate set here.
-    return [(name, "path", code, "ToNY|ToNJ") for code, name in _PATH_STATIONS]
+    return [(name, "path", code, "ToNY|ToNJ", "") for code, name in _PATH_STATIONS]
 
 
-def _njt_rail_rows() -> list[tuple[str, str, str, str]]:
+def _njt_rail_rows() -> list[tuple[str, str, str, str, str]]:
     rows = []
     with open(_ASSETS / "njt_rail_stations.csv", encoding="utf-8") as f:
         for record in csv.DictReader(f):
-            rows.append((record["stop_name"], "njt_rail", record["stop_code"], ""))
+            rows.append((record["stop_name"], "njt_rail", record["stop_code"], "", ""))
     return rows
 
 
-def _njt_bus_rows() -> list[tuple[str, str, str, str]]:
+def _njt_bus_rows() -> list[tuple[str, str, str, str, str]]:
     rows = []
     with open(_ASSETS / "njt_bus_stops.csv", encoding="utf-8") as f:
         for record in csv.DictReader(f):
-            rows.append((record["stop_name"], "njt_bus", record["stop_id"], ""))
+            rows.append(
+                (
+                    record["stop_name"],
+                    "njt_bus",
+                    record["stop_id"],
+                    "",
+                    record.get("toward", ""),
+                )
+            )
     return rows
 
 
-def _lirr_rows() -> list[tuple[str, str, str, str]]:
+def _lirr_rows() -> list[tuple[str, str, str, str, str]]:
     rows = []
     with open(_ASSETS / "lirr_stations.csv", encoding="utf-8") as f:
         for record in csv.DictReader(f):
-            rows.append((record["stop_name"], "lirr", record["stop_code"], ""))
+            rows.append((record["stop_name"], "lirr", record["stop_code"], "", ""))
     return rows
 
 
@@ -106,7 +127,7 @@ def main() -> None:
     )
     with open(_OUT_PATH, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, lineterminator="\n")
-        writer.writerow(["name", "agency", "code", "routes"])
+        writer.writerow(["name", "agency", "code", "routes", "toward"])
         writer.writerows(rows)
     print(f"Wrote {len(rows)} rows to {_OUT_PATH}")
 
