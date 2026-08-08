@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Float, String
+from sqlalchemy import Date, DateTime, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -65,6 +65,17 @@ class User(Base):
     # onboarding input the PRD calls out, since this tradeoff isn't reliably
     # observable from behavior alone. Defaults to neutral until set.
     reliability_pref: Mapped[float] = mapped_column(Float, default=0.5)
+
+    # The UTC calendar date Schedule AI last sent this user a commute
+    # notification - see schedule_engine.py. The job now runs hourly
+    # (rather than once daily at a fixed time), so this is what prevents
+    # notifying the same user more than once per day if their usual
+    # departure window happens to span more than one hourly run. A plain
+    # Date, not DateTime - only "which day," never a specific time, is
+    # tracked here.
+    last_commute_notification_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

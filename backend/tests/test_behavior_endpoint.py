@@ -25,6 +25,7 @@ def test_read_my_behavior_is_empty_for_new_user(client):
     assert body["feed_accuracy"] == []
     assert body["direction_choices"] == []
     assert body["timing_buffers"] == []
+    assert body["typical_arrival_times"] == []
 
 
 def test_read_my_behavior_surfaces_direction_choices(client, db_session):

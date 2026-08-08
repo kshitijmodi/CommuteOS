@@ -4,7 +4,7 @@ tier do reads from what this module computes. Deliberately deterministic
 aggregation over Trip history, no LLM, same "transparent and debuggable"
 posture as preference_engine.py.
 
-Three signals, computed independently since each answers a different
+Four signals, computed independently since each answers a different
 question:
 
 - feed accuracy: was the predicted_arrival right, for a given
@@ -15,13 +15,20 @@ question:
 - timing buffer: how long before predicted_arrival does this user
   actually start moving (leave home/office)? Feeds Schedule AI's "when to
   nudge" timing.
+- typical predicted-arrival time: what clock time does this user's usual
+  train/bus normally get predicted at, for a given station/slot? This is
+  what turns "today's live predicted_arrival looks late" into an actual
+  minutes-late NUMBER Schedule AI can honestly phrase as "leave N min
+  later" - see typical_predicted_arrival_for_user's docstring for why this
+  is a distinct question from feed_accuracy (which measures predicted-vs-
+  actual error, not a same-day-comparable baseline clock time).
 
 Time-of-day slotting uses a coarse 3-hour bucket (0-2, 3-5, ..., 21-23) -
 fine enough to separate "AM rush" from "PM rush" without needing so many
 buckets that any one of them starves for data given realistic trip
-volumes. Both signals below are None (not a fabricated number) until
-_MIN_SAMPLES observations exist for that slot - an unconfident guess is
-worse than an honest "not enough data yet," same principle as
+volumes. All signals below are None/omitted (never a fabricated number)
+until _MIN_SAMPLES observations exist for that slot - an unconfident
+guess is worse than an honest "not enough data yet," same principle as
 preference_engine.py's transfer_aversion_score gap.
 """
 
@@ -65,6 +72,20 @@ class TimingBuffer:
     time_slot: int
     sample_count: int
     average_buffer_minutes: float  # predicted_arrival - left_at, in minutes
+
+
+@dataclass(frozen=True)
+class TypicalArrivalTime:
+    origin_stop: str
+    time_slot: int
+    sample_count: int
+    # Average clock time (minutes since midnight UTC) that this station's
+    # predicted_arrival has historically landed at, for this slot - the
+    # baseline Schedule AI diffs today's live predicted_arrival against to
+    # get a real minutes-late number. UTC, not local time - callers must
+    # convert today's live predicted_arrival to the same UTC-minutes-since
+    # -midnight basis before diffing, or the comparison is meaningless.
+    average_minute_of_day_utc: float
 
 
 def feed_accuracy_for_user(db: Session, user_id) -> list[FeedAccuracy]:
@@ -194,4 +215,64 @@ def predict_direction(
     for choice in direction_choices_for_user(db, user_id):
         if choice.origin_stop == origin_stop and choice.time_slot == time_slot:
             return choice
+    return None
+
+
+def typical_arrival_times_for_user(db: Session, user_id) -> list[TypicalArrivalTime]:
+    """One entry per (origin_stop, time_slot) with enough samples that have
+    a predicted_arrival. Distinct from feed_accuracy_for_user, which
+    measures |actual - predicted| (how far off the feed's OWN number
+    turned out to be) - this instead answers "what predicted_arrival clock
+    time is normal here," a same-day-comparable baseline. Schedule AI
+    diffs today's live predicted_arrival against this to get a real
+    minutes-late number ("your usual train is normally predicted around
+    8:12, it's showing 8:27 today - that's a real ~15min delay"), not a
+    guess - see the module docstring on why these are different questions.
+
+    Averages minute-of-day naively (no midnight-wraparound handling) -
+    safe here because every real predicted_arrival in this app's actual
+    usage falls within normal daytime commute hours, never near midnight;
+    documented so this isn't silently assumed to generalize to any
+    time-of-day input.
+    """
+    trips = db.scalars(
+        select(Trip).where(
+            Trip.user_id == user_id,
+            Trip.predicted_arrival.isnot(None),
+        )
+    ).all()
+
+    groups: dict[tuple[str, int], list[float]] = defaultdict(list)
+    for trip in trips:
+        key = (trip.origin_stop, _time_slot(trip.start_time.hour))
+        predicted = trip.predicted_arrival
+        minute_of_day = predicted.hour * 60 + predicted.minute + predicted.second / 60
+        groups[key].append(minute_of_day)
+
+    results = []
+    for (origin_stop, time_slot), minutes in groups.items():
+        if len(minutes) < _MIN_SAMPLES:
+            continue
+        results.append(
+            TypicalArrivalTime(
+                origin_stop=origin_stop,
+                time_slot=time_slot,
+                sample_count=len(minutes),
+                average_minute_of_day_utc=sum(minutes) / len(minutes),
+            )
+        )
+    return results
+
+
+def typical_arrival_time_for(
+    db: Session, user_id, origin_stop: str, hour: int
+) -> TypicalArrivalTime | None:
+    """The one lookup Schedule AI actually needs at request time - same
+    pattern as predict_direction. Returns None (never a guess) if there
+    isn't enough history for this exact (origin_stop, time_slot).
+    """
+    time_slot = _time_slot(hour)
+    for typical in typical_arrival_times_for_user(db, user_id):
+        if typical.origin_stop == origin_stop and typical.time_slot == time_slot:
+            return typical
     return None

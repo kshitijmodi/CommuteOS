@@ -5,6 +5,8 @@ from app.behavior_engine import (
     feed_accuracy_for_user,
     predict_direction,
     timing_buffers_for_user,
+    typical_arrival_time_for,
+    typical_arrival_times_for_user,
 )
 from app.core.security import hash_password
 from app.models import Trip, User
@@ -216,3 +218,90 @@ def test_timing_buffer_ignores_trips_without_left_at(db_session):
     db_session.commit()
 
     assert timing_buffers_for_user(db_session, user.id) == []
+
+
+def test_typical_arrival_time_averages_predicted_arrival_clock_time(db_session):
+    user = _make_user(db_session)
+    # Predicted arrivals at 8:10, 8:12, 8:14 UTC -> average 8:12 = 492 min.
+    predicted_minutes = [10, 12, 14]
+    for i, minute in enumerate(predicted_minutes):
+        db_session.add(
+            Trip(
+                user_id=user.id,
+                start_time=_at_hour(8, days_ago=i),
+                mode="mta",
+                origin_stop="R20N",
+                predicted_arrival=_at_hour(8, days_ago=i).replace(minute=minute),
+            )
+        )
+    db_session.commit()
+
+    results = typical_arrival_times_for_user(db_session, user.id)
+
+    assert len(results) == 1
+    assert results[0].sample_count == 3
+    assert results[0].average_minute_of_day_utc == 8 * 60 + 12
+
+
+def test_typical_arrival_time_requires_minimum_samples(db_session):
+    user = _make_user(db_session)
+    now = datetime.now(timezone.utc)
+    for i in range(2):  # below the minimum of 3
+        db_session.add(
+            Trip(
+                user_id=user.id,
+                start_time=_at_hour(8, days_ago=i),
+                mode="mta",
+                origin_stop="R20N",
+                predicted_arrival=now,
+            )
+        )
+    db_session.commit()
+
+    assert typical_arrival_times_for_user(db_session, user.id) == []
+
+
+def test_typical_arrival_time_ignores_trips_without_predicted_arrival(db_session):
+    user = _make_user(db_session)
+    for i in range(3):
+        db_session.add(
+            Trip(
+                user_id=user.id,
+                start_time=_at_hour(8, days_ago=i),
+                mode="mta",
+                origin_stop="R20N",
+                predicted_arrival=None,
+            )
+        )
+    db_session.commit()
+
+    assert typical_arrival_times_for_user(db_session, user.id) == []
+
+
+def test_typical_arrival_time_for_returns_none_without_enough_history(db_session):
+    user = _make_user(db_session)
+
+    assert typical_arrival_time_for(db_session, user.id, "R20N", hour=8) is None
+
+
+def test_typical_arrival_time_for_matches_station_and_hour_slot(db_session):
+    user = _make_user(db_session)
+    for i in range(3):
+        db_session.add(
+            Trip(
+                user_id=user.id,
+                start_time=_at_hour(8, days_ago=i),
+                mode="mta",
+                origin_stop="R20N",
+                predicted_arrival=_at_hour(8, days_ago=i).replace(minute=15),
+            )
+        )
+    db_session.commit()
+
+    result = typical_arrival_time_for(db_session, user.id, "R20N", hour=6)  # same slot (6-8)
+
+    assert result is not None
+    assert result.average_minute_of_day_utc == 8 * 60 + 15
+
+    assert typical_arrival_time_for(db_session, user.id, "R20N", hour=20) is None
+    assert typical_arrival_time_for(db_session, user.id, "OTHER", hour=8) is None

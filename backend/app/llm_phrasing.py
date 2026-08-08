@@ -22,6 +22,7 @@ from openai import OpenAI, OpenAIError
 
 from .core.config import settings
 from .decision_engine import RankedRoute
+from .schedule_engine import DisruptionAssessment, DisruptionSeverity
 
 _SYSTEM_PROMPT = """You are a transit assistant. You will be given a single \
 JSON object describing one recommended route: mode, label, predicted \
@@ -160,3 +161,106 @@ def _template_comparison_phrase(winner: RankedRoute, alternatives: list[RankedRo
     else:
         reason = f"more reliable right now than your {runner_up.label}"
     return f"Your {winner.label} {hedge} arrive around {time_str} - {reason}."
+
+
+_SCHEDULE_SYSTEM_PROMPT = """You are CommuteOS's Schedule AI - you tell a \
+commuter whether to leave now, on schedule, or whether their usual route \
+looks disrupted today. You will be given a JSON object with a "severity" \
+field ("on_time", "delayed", or "no_live_data"), the usual route's label, \
+its live predicted_arrival, and - only for "delayed" - a real \
+delay_minutes number. If severity is "no_live_data", you will also be \
+given a "substitute" object (mode, label, predicted arrival, confidence) \
+- a real alternative a separate scoring system already picked; you are \
+not choosing it.
+
+Write ONE short sentence (under 200 characters) telling the commuter what \
+to do, in a natural, direct tone:
+- "on_time": say their usual route looks on schedule, citing its real \
+predicted_arrival time.
+- "delayed": say their usual route is running late, citing the REAL \
+delay_minutes number given - never invent or round it differently.
+- "no_live_data": say their usual route isn't showing live data right \
+now and recommend the given substitute instead, citing its real \
+predicted_arrival.
+
+Rules you must never break:
+- Only use the numbers/times/labels given to you - never invent one.
+- Never invent a reason for a delay (weather, crowding, etc.) - you \
+weren't given that data.
+- Output only the sentence, no preamble, no quotes around it."""
+
+
+def phrase_schedule_notification(
+    assessment: DisruptionAssessment,
+    usual_label: str,
+    live_predicted_arrival,
+    substitute: RankedRoute | None = None,
+) -> str:
+    """Schedule AI's phrasing entry point - same narrow, fail-soft posture
+    as phrase_recommendation/phrase_comparison. [substitute] is required
+    when assessment.severity is NO_LIVE_DATA (the real alternative
+    decision_engine.rank_routes already picked - this function only
+    phrases it, never picks it) and ignored otherwise.
+    """
+    if not settings.groq_api_key:
+        return _template_schedule_phrase(assessment, usual_label, live_predicted_arrival, substitute)
+
+    client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+
+    payload = {
+        "severity": assessment.severity.value,
+        "usual_label": usual_label,
+        "predicted_arrival": live_predicted_arrival.isoformat() if live_predicted_arrival else None,
+        "delay_minutes": round(assessment.delay_minutes, 1) if assessment.delay_minutes is not None else None,
+        "substitute": (
+            {
+                "mode": substitute.mode,
+                "label": substitute.label,
+                "predicted_arrival": substitute.predicted_arrival.isoformat(),
+                "confidence": round(substitute.confidence, 2),
+            }
+            if substitute is not None
+            else None
+        ),
+    }
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.groq_model,
+            temperature=0.2,
+            max_tokens=120,
+            messages=[
+                {"role": "system", "content": _SCHEDULE_SYSTEM_PROMPT},
+                {"role": "user", "content": str(payload)},
+            ],
+        )
+        text = response.choices[0].message.content
+        return (
+            text.strip()
+            if text
+            else _template_schedule_phrase(assessment, usual_label, live_predicted_arrival, substitute)
+        )
+    except OpenAIError:
+        return _template_schedule_phrase(assessment, usual_label, live_predicted_arrival, substitute)
+
+
+def _template_schedule_phrase(
+    assessment: DisruptionAssessment,
+    usual_label: str,
+    live_predicted_arrival,
+    substitute: RankedRoute | None,
+) -> str:
+    if assessment.severity == DisruptionSeverity.NO_LIVE_DATA:
+        if substitute is None:
+            return f"Your usual {usual_label} isn't showing live data right now."
+        time_str = substitute.predicted_arrival.strftime("%I:%M %p").lstrip("0")
+        return (
+            f"Your usual {usual_label} isn't showing live data right now - "
+            f"try your {substitute.label}, arriving around {time_str}."
+        )
+
+    time_str = live_predicted_arrival.strftime("%I:%M %p").lstrip("0")
+    if assessment.severity == DisruptionSeverity.DELAYED:
+        delay = round(assessment.delay_minutes or 0)
+        return f"Your usual {usual_label} looks about {delay} min later than normal today, arriving around {time_str}."
+    return f"Your usual {usual_label} is on schedule, arriving around {time_str}."

@@ -4,9 +4,12 @@ from app.decision_engine import RankedRoute
 from app.llm_phrasing import (
     _template_comparison_phrase,
     _template_phrase,
+    _template_schedule_phrase,
     phrase_comparison,
     phrase_recommendation,
+    phrase_schedule_notification,
 )
+from app.schedule_engine import DisruptionAssessment, DisruptionSeverity
 
 
 def _route(mode="path", label="PATH", confidence=0.9, minutes_from_now=15):
@@ -84,3 +87,52 @@ def test_template_comparison_cites_reliability_when_winner_is_slower_but_more_co
 
     assert "reliable" in text
     assert "PATH" in text
+
+
+def test_schedule_phrase_on_time_cites_real_predicted_arrival():
+    assessment = DisruptionAssessment(severity=DisruptionSeverity.ON_TIME, delay_minutes=1.5)
+    live = datetime(2026, 1, 1, 8, 10, tzinfo=timezone.utc)
+
+    text = _template_schedule_phrase(assessment, "R20N", live, substitute=None)
+
+    assert "on schedule" in text
+    assert "8:10" in text
+
+
+def test_schedule_phrase_delayed_cites_the_real_delay_minutes_number():
+    assessment = DisruptionAssessment(severity=DisruptionSeverity.DELAYED, delay_minutes=15.4)
+    live = datetime(2026, 1, 1, 8, 25, tzinfo=timezone.utc)
+
+    text = _template_schedule_phrase(assessment, "R20N", live, substitute=None)
+
+    assert "15" in text
+    assert "R20N" in text
+
+
+def test_schedule_phrase_no_live_data_with_a_substitute():
+    assessment = DisruptionAssessment(severity=DisruptionSeverity.NO_LIVE_DATA, delay_minutes=None)
+    substitute = _route(mode="mta", label="N train", minutes_from_now=10)
+
+    text = _template_schedule_phrase(assessment, "R20N", None, substitute=substitute)
+
+    assert "isn't showing live data" in text
+    assert "N train" in text
+
+
+def test_schedule_phrase_no_live_data_with_no_substitute_either():
+    assessment = DisruptionAssessment(severity=DisruptionSeverity.NO_LIVE_DATA, delay_minutes=None)
+
+    text = _template_schedule_phrase(assessment, "R20N", None, substitute=None)
+
+    assert "isn't showing live data" in text
+
+
+def test_phrase_schedule_notification_falls_back_to_template_when_no_api_key(monkeypatch):
+    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    assessment = DisruptionAssessment(severity=DisruptionSeverity.ON_TIME, delay_minutes=1.0)
+    live = datetime(2026, 1, 1, 8, 10, tzinfo=timezone.utc)
+
+    text = phrase_schedule_notification(assessment, "R20N", live)
+
+    assert "R20N" in text
+    assert "8:10" in text

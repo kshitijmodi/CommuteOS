@@ -6,6 +6,7 @@ from ..behavior_engine import (
     direction_choices_for_user,
     feed_accuracy_for_user,
     timing_buffers_for_user,
+    typical_arrival_times_for_user,
 )
 from ..core.database import get_db
 from ..core.deps import get_current_user
@@ -43,18 +44,29 @@ class TimingBufferOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TypicalArrivalTimeOut(BaseModel):
+    origin_stop: str
+    time_slot: int
+    sample_count: int
+    average_minute_of_day_utc: float
+
+    model_config = {"from_attributes": True}
+
+
 class BehaviorSummary(BaseModel):
     """Read-only view into what Behavior AI has learned so far - exposed
     mainly so the app can show "here's what CommuteOS has picked up on you"
     (same trust-preserving spirit as GET /preferences/me), and so Commute/
     Schedule/Chat AI have a single endpoint to sanity-check against during
     development. The actual read path those features use at request time is
-    behavior_engine.predict_direction, called directly - not this endpoint.
+    behavior_engine.predict_direction / typical_arrival_time_for, called
+    directly - not this endpoint.
     """
 
     feed_accuracy: list[FeedAccuracyOut]
     direction_choices: list[DirectionChoiceOut]
     timing_buffers: list[TimingBufferOut]
+    typical_arrival_times: list[TypicalArrivalTimeOut]
 
 
 @router.get("/me", response_model=BehaviorSummary)
@@ -66,4 +78,5 @@ def read_my_behavior(
         feed_accuracy=feed_accuracy_for_user(db, current_user.id),
         direction_choices=direction_choices_for_user(db, current_user.id),
         timing_buffers=timing_buffers_for_user(db, current_user.id),
+        typical_arrival_times=typical_arrival_times_for_user(db, current_user.id),
     )

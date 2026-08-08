@@ -1,72 +1,137 @@
-"""Standalone entrypoint for the proactive commute-notification job - the
-first genuinely "agentic" piece of the app: instead of a fixed-time local
-reminder (see lib/account/commute_notification_service.dart), this runs
-the real decision engine + LLM phrasing against a user's inferred home/
-office station and pushes an actual recommendation.
+"""Schedule AI's delivery mechanism (see PRD Phase 3 and
+app/schedule_engine.py) - the first genuinely "agentic" piece of the app,
+now evolved from a single fixed-time daily fire into a real per-user
+timing decision: fires once, ahead of each user's own usual departure
+hour (learned from Trip history via schedule_engine.usual_departure_hour_for),
+not one clock time for everyone.
 
 Can be run manually (`python -m app.jobs.send_commute_notifications`) or,
-in production, is triggered once daily via POST /internal/run-commute-job
-(see routers/internal.py) by a scheduled GitHub Actions workflow. Runs
-once for every eligible user at one fixed time (7:45 AM ET) regardless of
-each user's actual typical departure time - see OPEN_QUESTIONS.md.
+in production, is triggered HOURLY via POST /internal/run-commute-job
+(see routers/internal.py, .github/workflows/commute-notifications.yml) -
+hourly, not a tighter interval, because GitHub Actions cron doesn't
+reliably honor sub-hour intervals under platform load (see
+OPEN_QUESTIONS.md) - an honest reliability/precision tradeoff, not an
+oversight. Every run considers every eligible user and only actually
+notifies the ones inside their own personal notification window this
+hour, at most once per UTC calendar day (User.last_commute_notification_date).
 
-Eligibility: a user must have (a) a confirmed home/office inference (per
-the PRD's "confirmed once via a prompt" step - an unconfirmed inference
-isn't authoritative enough to act on unprompted), (b) a registered
-fcm_token (opted into push), and (c) at least one of home/office station
-resolvable to a real CandidateSpec (needs its route_or_direction filled
-in for MTA/PATH - see home_office_engine.py's docstring on why that can
-be null even when the station itself is known).
+Eligibility: a user must have (a) a confirmed home/office inference, (b) a
+registered fcm_token, (c) enough morning-trip history for
+schedule_engine.usual_departure_hour_for to return an hour at all, (d) the
+current hour actually being that user's notification window, and (e) not
+already notified today.
+
+Message content is now a real Schedule AI decision, not just "here's your
+usual route's number": on-time route -> phrased confirmation; a real,
+Behavior-AI-baseline-derived delay -> phrased with the actual delay
+minutes; no live data for the usual route at all -> Schedule AI delegates
+to decision_engine.rank_routes across every home/office candidate for a
+real substitute, which is what "Schedule AI hands off to the routing
+engine rather than re-implementing route-picking" concretely means today
+(see schedule_engine.py's module docstring).
 """
+
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.database import SessionLocal
-from ..models import User
+from ..decision_engine import rank_routes
+from ..llm_phrasing import phrase_schedule_notification
+from ..models import Trip, User
 from ..notify_service import PushSendException, send_push
-from ..recommendation_builder import build_recommendation, specs_from_home_office
+from ..recommendation_builder import fetch_candidates, specs_from_home_office
+from ..schedule_engine import (
+    DisruptionSeverity,
+    assess_candidate,
+    is_within_notification_window,
+    usual_departure_hour_for,
+)
 
 
-async def send_notification_for_user(db: Session, user: User) -> bool:
+async def send_notification_for_user(db: Session, user: User, now: datetime) -> bool:
     """Returns True if a notification was actually sent. False (not an
-    error) for any of: not confirmed, no push token, no usable candidate,
-    no live arrivals found for the candidates that do exist, or FCM itself
-    rejecting the send (e.g. a stale/invalid token) - one user's bad token
-    shouldn't stop the batch from notifying everyone else.
+    error) for any ineligibility reason - one user's ineligibility or bad
+    token shouldn't stop the batch from considering everyone else.
     """
     if not user.fcm_token:
+        return False
+
+    today = now.date()
+    if user.last_commute_notification_date == today:
+        return False
+
+    usual_hour = usual_departure_hour_for(db, user.id, is_morning=True)
+    if usual_hour is None:
+        return False
+    if not is_within_notification_window(now.hour, usual_hour):
         return False
 
     specs = specs_from_home_office(user)
     if not specs:
         return False
 
-    outcome = await build_recommendation(db, user, specs)
-    if outcome is None:
-        return False
+    # The "usual route" Schedule AI is checking is specifically the home
+    # -leg candidate (morning departure) - specs_from_home_office returns
+    # [home, office] when both resolve; home is always first when present.
+    home_spec = next((s for s in specs if s.label == user.home_station), specs[0])
 
-    _best, _alternatives, message, _trip = outcome
+    candidates = await fetch_candidates(specs)
+    home_candidates = [c for c in candidates if c.label == home_spec.label]
+    live_predicted_arrival = None
+    if home_candidates and home_candidates[0].arrivals.arrivals:
+        live_predicted_arrival = home_candidates[0].arrivals.arrivals[0].arrival_time
+
+    assessment = assess_candidate(
+        db, user.id, home_spec.stop_or_station, now.hour, live_predicted_arrival
+    )
+
+    substitute = None
+    if assessment.severity == DisruptionSeverity.NO_LIVE_DATA:
+        ranked = rank_routes(candidates, reliability_pref=user.reliability_pref, now=now)
+        if not ranked:
+            return False  # nothing usable to recommend instead - stay quiet rather than send an empty notification
+        substitute = ranked[0]
+
+    message = phrase_schedule_notification(
+        assessment,
+        usual_label=home_spec.label,
+        live_predicted_arrival=live_predicted_arrival,
+        substitute=substitute,
+    )
+
+    trip = Trip(
+        user_id=user.id,
+        start_time=now,
+        mode=substitute.mode if substitute else home_spec.agency,
+        origin_stop=substitute.label if substitute else home_spec.label,
+        predicted_arrival=substitute.predicted_arrival if substitute else live_predicted_arrival,
+    )
+    db.add(trip)
+
     try:
-        send_push(
-            user.fcm_token,
-            title="Time to check your commute",
-            body=message,
-        )
+        send_push(user.fcm_token, title="Time to check your commute", body=message)
     except PushSendException:
         return False
+
+    user.last_commute_notification_date = today
     return True
 
 
-async def send_notifications_for_all_users(db: Session) -> int:
+async def send_notifications_for_all_users(db: Session, now: datetime | None = None) -> int:
     """Returns the number of users actually notified (not the number
     considered - see send_notification_for_user for why many are skipped
-    without being an error)."""
+    without being an error). [now] defaults to the real current time in
+    production; tests pass an explicit value so "is now inside this
+    user's window" assertions don't depend on wall-clock timing at the
+    moment the test happens to run.
+    """
+    now = now or datetime.now(timezone.utc)
     user_ids = db.scalars(select(User.id)).all()
     sent_count = 0
     for user_id in user_ids:
         user = db.get(User, user_id)
-        if await send_notification_for_user(db, user):
+        if await send_notification_for_user(db, user, now):
             sent_count += 1
     db.commit()
     return sent_count
@@ -74,6 +139,8 @@ async def send_notifications_for_all_users(db: Session) -> int:
 
 def main() -> None:
     import asyncio
+
+    from ..core.database import SessionLocal
 
     db = SessionLocal()
     try:
