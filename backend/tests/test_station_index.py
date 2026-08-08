@@ -1,4 +1,16 @@
-from app.station_index import find_stations, normalize, station_for
+from app.station_index import contains_whole, find_stations, normalize, station_for
+
+
+def test_contains_whole_matches_a_name_inside_a_full_sentence():
+    assert contains_whole("what do i usually take from grove street", "grove street")
+
+
+def test_contains_whole_does_not_match_a_fragment_inside_an_unrelated_word():
+    assert not contains_whole("what does average commute look like", "ave")
+
+
+def test_contains_whole_returns_false_for_an_empty_needle():
+    assert not contains_whole("anything", "")
 
 
 def test_normalize_strips_punctuation_and_lowercases():

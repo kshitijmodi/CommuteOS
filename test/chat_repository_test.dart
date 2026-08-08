@@ -1,10 +1,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:commuteos/account/auth_repository.dart';
 import 'package:commuteos/chat/chat_repository.dart';
 
+Future<AuthRepository> _loggedInAuthRepository() async {
+  final authRepository = AuthRepository(
+    client: MockClient(
+      (request) async => http.Response('{"access_token": "tok123"}', 200),
+    ),
+  );
+  await authRepository.login('me@example.com', 'hunter2');
+  return authRepository;
+}
+
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('ask', () {
     test('sends the question and parses a real arrivals answer', () async {
       http.Request? capturedRequest;
@@ -69,9 +85,10 @@ void main() {
       expect(() => repository.ask('anything'), throwsA(isA<ChatException>()));
     });
 
-    test('requires no auth header', () async {
+    test('does not send an Authorization header when not logged in', () async {
       http.Request? capturedRequest;
       final repository = ChatRepository(
+        authRepository: AuthRepository(),
         client: MockClient((request) async {
           capturedRequest = request;
           return http.Response('{"answer":"hi"}', 200);
@@ -81,6 +98,22 @@ void main() {
       await repository.ask('hi');
 
       expect(capturedRequest!.headers.containsKey('Authorization'), isFalse);
+    });
+
+    test('sends the real token when logged in, unlocking the personalized tier', () async {
+      final authRepository = await _loggedInAuthRepository();
+      http.Request? capturedRequest;
+      final repository = ChatRepository(
+        authRepository: authRepository,
+        client: MockClient((request) async {
+          capturedRequest = request;
+          return http.Response('{"answer":"Take the N instead of your usual W."}', 200);
+        }),
+      );
+
+      await repository.ask('what do I usually take from here');
+
+      expect(capturedRequest!.headers['Authorization'], 'Bearer tok123');
     });
   });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:commuteos/chat/chat_repository.dart';
 import 'package:commuteos/chat/chat_screen.dart';
@@ -12,6 +13,15 @@ Widget _wrap(Widget child) {
 }
 
 void main() {
+  setUp(() {
+    // ChatRepository now optionally reads a stored auth token (see
+    // chat_repository.dart) via real SharedPreferences I/O - without a
+    // mocked instance, that never resolves within the widget test's fake
+    // clock and pumpAndSettle hangs (same class of bug this codebase has
+    // hit before with other real-async-I/O-during-a-widget-test cases).
+    SharedPreferences.setMockInitialValues({});
+  });
+
   testWidgets('shows an empty-state prompt before any message is sent', (
     tester,
   ) async {

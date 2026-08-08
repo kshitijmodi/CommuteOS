@@ -88,13 +88,19 @@ def find_stations(query: str, limit: int = 5) -> list[StationMatch]:
     matches = [
         station
         for station in _all_stations()
-        if _contains_whole(normalized_query, normalize(station.name))
+        if contains_whole(normalized_query, normalize(station.name))
     ]
     matches.sort(key=lambda s: len(s.name))
     return matches[:limit]
 
 
-def _contains_whole(haystack: str, needle: str) -> bool:
+def contains_whole(haystack: str, needle: str) -> bool:
+    """Public (not just find_stations's private helper) since chat_ai.py's
+    _is_unambiguous needs the same whole-word-substring check to decide
+    "does this match's name genuinely appear in the question," not just
+    "is the whole question equal to the name" - a full free-text question
+    is never literally equal to a bare station name.
+    """
     if not needle:
         return False
     return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None

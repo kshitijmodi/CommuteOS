@@ -1,7 +1,22 @@
-"""Chat AI - stateless tier (see PRD Phase 3). User-initiated only, never
-proactive. Answers using only live feed data for a station the question
-itself names - zero dependency on Behavior AI, which is why this tier
-ships independently of the personalized tier that reads user history.
+"""Chat AI - both tiers (see PRD Phase 3). User-initiated only, never
+proactive. One endpoint, one pipeline for both:
+
+- Stateless tier: answers using only live feed data for a station the
+  question itself names - zero dependency on Behavior AI, works with no
+  login at all.
+- Personalized tier: for a question that reads as personal ("what do I
+  usually take from here") from a LOGGED-IN user whose question resolves
+  to one real station, answers via commute_engine.recommend_for_station
+  - the EXACT SAME function Commute AI's own endpoint calls - and phrases
+  it with the exact same phrase_commute_recommendation Commute AI uses.
+  This is what makes "Chat AI's personalized tier must give the same
+  answer Commute AI would give in card form" (the PRD's own wording)
+  structurally true rather than a promise to keep two implementations in
+  sync: there is only one implementation. Falls back to the stateless
+  arrivals answer (not a refusal) when personal phrasing is detected but
+  the user isn't logged in, or when recommend_for_station itself has
+  nothing to say (no history, no live data) - a logged-out or cold-start
+  user still gets a useful answer, just not a personalized one.
 
 Pipeline, deliberately linear and inspectable (no agentic tool-calling
 loop - the LLM never decides what to fetch, it only phrases what this
@@ -9,23 +24,29 @@ module already fetched deterministically):
 1. station_index.find_stations() resolves the question's station name.
    Zero matches -> ask the user to clarify (real refusal, not a guess).
    Multiple matches -> list the real options, let the user pick.
-2. Exactly one match -> fetch REAL live arrivals across every route/
-   direction that agency's station serves (never a single arbitrarily
-   -picked route/direction - a chat question doesn't specify one the way
-   an app screen selection would).
-3. Phrase the real fetched arrivals into an answer. The LLM's job is
-   exactly as narrow as llm_phrasing.py's: turn real structured data into
-   a sentence, never invent a number, never answer a question with no
-   real data behind it (fares, crowding, anything outside NYC-metro
-   transit) - it must refuse those plainly instead of guessing.
+2. A personal question, a logged-in user, and an unambiguous match ->
+   try the personalized path first (see above). Anything else, or that
+   path coming back empty -> the stateless path: fetch REAL live arrivals
+   across every route/direction that agency's station serves (never a
+   single arbitrarily-picked route/direction - a chat question doesn't
+   specify one the way an app screen selection would).
+3. Phrase the real fetched data into an answer. The LLM's job is exactly
+   as narrow as llm_phrasing.py's: turn real structured data into a
+   sentence, never invent a number, never answer a question with no real
+   data behind it (fares, crowding, anything outside NYC-metro transit) -
+   it must refuse those plainly instead of guessing.
 """
 
 from dataclasses import dataclass
 
 from openai import OpenAI, OpenAIError
+from sqlalchemy.orm import Session
 
+from .commute_engine import recommend_for_station
 from .core.config import settings
-from .station_index import StationMatch, find_stations, normalize
+from .llm_phrasing import phrase_commute_recommendation
+from .models import User
+from .station_index import StationMatch, contains_whole, find_stations, normalize
 from .transit import lirr, mta, njt_bus, njt_rail, path
 from .transit.models import Arrival, ArrivalsResult
 
@@ -123,6 +144,25 @@ def _is_out_of_scope(question: str) -> bool:
     return any(term in lowered for term in out_of_scope_terms)
 
 
+def _is_personal_question(question: str) -> bool:
+    """Same cheap, auditable keyword-gate approach as _is_out_of_scope -
+    not the LLM's call, since "is this asking about ME specifically" is
+    exactly the kind of scope judgment that shouldn't drift silently.
+    Only ever widens which questions ATTEMPT the personalized path (see
+    answer_question) - never itself decides the personalized path
+    succeeds; recommend_for_station's own real no-history/no-live-data
+    checks still gate whether it actually returns anything.
+    """
+    lowered = question.lower()
+    personal_terms = (
+        "usual", "usually", "normally", "typically",
+        "my train", "my bus", "my usual",
+        "do i usually", "what do i take", "what should i take",
+        "should i take",
+    )
+    return any(term in lowered for term in personal_terms)
+
+
 async def _fetch_all_arrivals(match: StationMatch) -> ArrivalsResult:
     """Fetches every real arrival for [match]'s station across every
     route/direction that agency serves there - a chat question never
@@ -155,7 +195,15 @@ def _merge(results: list[ArrivalsResult]) -> ArrivalsResult:
     return ArrivalsResult(arrivals=arrivals, is_live=is_live)
 
 
-async def answer_question(question: str) -> ChatAnswer:
+async def answer_question(
+    question: str, db: Session | None = None, user_id=None
+) -> ChatAnswer:
+    """[db]/[user_id] are only used for the personalized tier - both None
+    (the stateless caller's default) means "never attempt personalization,"
+    same behavior as before this tier existed. A caller passing user_id
+    without a real db session (or vice versa) is a programming error, not
+    handled specially - both are set together by the router or neither is.
+    """
     if _is_out_of_scope(question):
         context = {"kind": "out_of_scope"}
         text = _ask_llm(question, context) or _template_answer(context)
@@ -177,6 +225,16 @@ async def answer_question(question: str) -> ChatAnswer:
         return ChatAnswer(text=text, station=None)
 
     match = matches[0]
+
+    if db is not None and user_id is not None and _is_personal_question(question):
+        personalized = await _try_personalized_answer(db, user_id, match)
+        if personalized is not None:
+            return personalized
+        # Falls through to the stateless path below - a personal-sounding
+        # question from a logged-in user with no history/live data yet
+        # still gets a real, useful (just not personalized) answer rather
+        # than an empty result.
+
     result = await _fetch_all_arrivals(match)
     context = {
         "kind": "arrivals",
@@ -195,20 +253,49 @@ async def answer_question(question: str) -> ChatAnswer:
     return ChatAnswer(text=text, station=match)
 
 
+async def _try_personalized_answer(db: Session, user_id, match: StationMatch) -> ChatAnswer | None:
+    """Calls the EXACT SAME function Commute AI's own GET /commute
+    endpoint calls, with the user's real reliability_pref, phrased with
+    the EXACT SAME phrase_commute_recommendation - see the module
+    docstring on why this, not a second implementation, is what makes
+    the PRD's "must give the same answer Commute AI would give in card
+    form" requirement true by construction rather than a promise to keep
+    two copies in sync.
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        return None
+
+    recommendation = await recommend_for_station(
+        db, user_id, match.agency, match.code, user.reliability_pref
+    )
+    if recommendation is None:
+        return None
+
+    text = phrase_commute_recommendation(recommendation)
+    return ChatAnswer(text=text, station=match)
+
+
 def _is_unambiguous(question: str, matches: list[StationMatch]) -> bool:
     """A query can substring-match many rows (e.g. "hoboken" matches both
     the real Hoboken PATH/NJT-rail station AND several unrelated NJT bus
     stops with "Hoboken Ave" in their street name) while still having one
     clearly-intended winner - the shortest/closest name match. Treat that
-    as unambiguous only when the top match's normalized name equals the
-    query outright AND no other match shares that exact same name -
+    as unambiguous only when the top match's name is a genuine whole-word
+    match within the question (same contains_whole check find_stations
+    itself uses - a full free-text question is never literally EQUAL to a
+    bare station name, so checking exact equality here was a real bug:
+    it silently treated every real full-sentence question as ambiguous,
+    only ever "working" in tests/usage that happened to pass a bare
+    station name) AND no other match shares that exact same name -
     several of MTA's real stations share an exact name despite being
     unconnected, unrelated physical stations (e.g. four separate "23 St"s
-    - see OPEN_QUESTIONS.md), so an exact name match alone isn't enough
+    - see OPEN_QUESTIONS.md), so a genuine name match alone isn't enough
     to safely pick one; this must still surface real options rather than
     silently guessing among them.
     """
     top = matches[0]
-    if normalize(top.name) != normalize(question):
+    normalized_question = normalize(question)
+    if not contains_whole(normalized_question, normalize(top.name)):
         return False
     return not any(m is not top and normalize(m.name) == normalize(top.name) for m in matches)
