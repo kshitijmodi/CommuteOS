@@ -46,7 +46,13 @@ from .commute_engine import recommend_for_station
 from .core.config import settings
 from .llm_phrasing import phrase_commute_recommendation
 from .models import User
-from .station_index import StationMatch, contains_whole, find_stations, normalize
+from .station_index import (
+    StationMatch,
+    contains_whole,
+    find_stations,
+    nearest_stations,
+    normalize,
+)
 from .transit import lirr, mta, njt_bus, njt_rail, path
 from .transit.models import Arrival, ArrivalsResult
 
@@ -74,6 +80,13 @@ do not silently pick for them.
 arrival times (e.g. fares, crowding levels, weather, anything outside \
 subway/rail/bus arrivals). Say plainly you don't have that information - \
 never guess or invent an answer.
+- {"kind": "no_location"} - the user asked about the nearest/closest \
+station but no real location was available. Say plainly you don't have \
+their current location; never guess a station.
+- {"kind": "nearest", "station": ..., "agency": ..., "distance_miles": \
+...} - a real nearest-station answer, already computed from the user's \
+real coordinates. State the station name and the real distance in miles \
+- never invent a different distance or station.
 
 Rules you must never break:
 - Never invent a time, a station, or a fact not present in the given \
@@ -98,6 +111,13 @@ def _template_answer(context: dict) -> str:
     kind = context["kind"]
     if kind == "out_of_scope":
         return "I can only help with real-time subway, rail, and bus arrival times in the NYC area - I don't have that information."
+    if kind == "no_location":
+        return "I don't have your current location, so I can't tell you the nearest station."
+    if kind == "nearest":
+        return (
+            f"The nearest station is {context['station']}, about "
+            f"{context['distance_miles']} miles away."
+        )
     if kind == "no_match":
         return "I couldn't find a station matching that - could you tell me the station name?"
     if kind == "ambiguous":
@@ -147,29 +167,39 @@ def _ask_llm(question: str, context: dict) -> str | None:
 
 def _is_out_of_scope(question: str) -> bool:
     """Cheap, explainable keyword gate for the clearest out-of-scope
-    cases (fares, crowding, weather, location-dependent "nearest to me"
-    questions - this app has no GPS/location input anywhere, see
-    OPEN_QUESTIONS.md) - deliberately not the LLM's call, since asking
-    the LLM to self-police scope is exactly the kind of judgment call
-    that can drift; a fixed list is auditable. This is a narrow,
-    additive check - it only ever adds an out-of-scope refusal, never
-    overrides a real station match found below.
+    cases (fares, crowding, weather) - deliberately not the LLM's call,
+    since asking the LLM to self-police scope is exactly the kind of
+    judgment call that can drift; a fixed list is auditable. This is a
+    narrow, additive check - it only ever adds an out-of-scope refusal,
+    never overrides a real station match found below.
 
-    "nearest"/"closest" is checked BEFORE find_stations ever runs (see
-    answer_question) specifically because a real bug shipped otherwise:
-    "what's the nearest PATH station to me" has no location to answer
-    from, but "PATH" alone can still substring-match real station names
-    (e.g. two real NJT bus stops literally named "PATH STATION") and get
-    treated as a station-name search instead of being refused - the
-    right answer here is "I don't have your location," not a guess at
-    which literal station name the question happened to contain.
+    Location-dependent ("nearest"/"closest") questions are handled
+    separately by _is_nearest_question - NOT here - since as of
+    2026-08-08 those are genuinely answerable when the client sends real
+    coordinates (see answer_question), unlike fares/crowding/weather,
+    which this app can never answer regardless of what it's given.
     """
     lowered = question.lower()
-    out_of_scope_terms = (
-        "fare", "cost", "price", "crowd", "weather", "ticket price",
-        "nearest", "closest", "near me", "close to me",
-    )
+    out_of_scope_terms = ("fare", "cost", "price", "crowd", "weather", "ticket price")
     return any(term in lowered for term in out_of_scope_terms)
+
+
+def _is_nearest_question(question: str) -> bool:
+    """Detects a "nearest/closest station to me"-style question - checked
+    BEFORE find_stations ever runs (see answer_question) specifically
+    because a real bug shipped otherwise: "what's the nearest PATH
+    station to me" has no location to answer from without real
+    coordinates, but "PATH" alone can still substring-match real station
+    names (e.g. two real NJT bus stops literally named "PATH STATION")
+    and get treated as a station-name search instead - see
+    OPEN_QUESTIONS.md, 2026-08-08. With real lat/lng now provided by the
+    client (see answer_question's lat/lng params), this becomes a real,
+    answerable question via station_index.nearest_stations rather than
+    an automatic refusal.
+    """
+    lowered = question.lower()
+    nearest_terms = ("nearest", "closest", "near me", "close to me")
+    return any(term in lowered for term in nearest_terms)
 
 
 def _is_personal_question(question: str) -> bool:
@@ -223,15 +253,95 @@ def _merge(results: list[ArrivalsResult]) -> ArrivalsResult:
     return ArrivalsResult(arrivals=arrivals, is_live=is_live)
 
 
+_AGENCY_TERMS: dict[str, str] = {
+    "path": "path",
+    "mta": "mta",
+    "subway": "mta",
+    "njt rail": "njt_rail",
+    "nj transit rail": "njt_rail",
+    "njt bus": "njt_bus",
+    "nj transit bus": "njt_bus",
+    "lirr": "lirr",
+    "long island rail road": "lirr",
+}
+
+
+def _agency_mentioned(question: str) -> str | None:
+    """Best-effort, cheap keyword match for which agency a "nearest ___
+    station" question means (e.g. "nearest PATH station" -> "path") -
+    None (search every agency) when no agency name appears, e.g. a plain
+    "what's the nearest station to me". Same auditable-keyword-list
+    posture as every other classifier in this module - a wrong/missing
+    match here only ever widens the search, never silently narrows to
+    the wrong agency and hides a closer real station in a different one.
+    """
+    lowered = question.lower()
+    for term, agency in _AGENCY_TERMS.items():
+        if term in lowered:
+            return agency
+    return None
+
+
+def _answer_nearest_question(
+    question: str, lat: float | None, lng: float | None
+) -> ChatAnswer:
+    """Answers a "nearest/closest station to me" question using the
+    client's real coordinates - see answer_question's lat/lng docs and
+    station_index.nearest_stations. Never invents a station or a
+    distance: no coordinates provided (the common case - most callers
+    don't have location permission, or the question isn't asking about
+    location at all) is a real, honest refusal, not a guess. Answers
+    with the station's name and real distance only - not its live
+    arrivals; a natural follow-up question ("what time's the next train
+    from there") re-enters the normal stateless pipeline above using the
+    real station name this answer already gave.
+    """
+    if lat is None or lng is None:
+        context = {"kind": "no_location"}
+        text = _ask_llm(question, context) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    agency = _agency_mentioned(question)
+    nearby = nearest_stations(lat, lng, limit=1, agency=agency)
+    if not nearby:
+        context = {"kind": "no_location"}
+        text = _ask_llm(question, context) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    nearest = nearby[0]
+    context = {
+        "kind": "nearest",
+        "station": nearest.station.name,
+        "agency": nearest.station.agency,
+        "distance_miles": round(nearest.distance_miles, 1),
+    }
+    text = _ask_llm(question, context) or _template_answer(context)
+    return ChatAnswer(text=text, station=nearest.station)
+
+
 async def answer_question(
-    question: str, db: Session | None = None, user_id=None
+    question: str,
+    db: Session | None = None,
+    user_id=None,
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> ChatAnswer:
     """[db]/[user_id] are only used for the personalized tier - both None
     (the stateless caller's default) means "never attempt personalization,"
     same behavior as before this tier existed. A caller passing user_id
     without a real db session (or vice versa) is a programming error, not
     handled specially - both are set together by the router or neither is.
+
+    [lat]/[lng] are the caller's real device coordinates, if the client
+    both has location permission AND sent them (see routers/chat.py) -
+    used only for a "nearest station" question (see _is_nearest_question);
+    ignored entirely for every other question. Both None (no coordinates
+    sent, or the question isn't location-dependent) is the normal case
+    for most questions and callers.
     """
+    if _is_nearest_question(question):
+        return _answer_nearest_question(question, lat, lng)
+
     if _is_out_of_scope(question):
         context = {"kind": "out_of_scope"}
         text = _ask_llm(question, context) or _template_answer(context)

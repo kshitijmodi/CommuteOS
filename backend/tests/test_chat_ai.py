@@ -220,3 +220,49 @@ async def test_personalized_answer_matches_commute_ai_exactly(db_session):
     commute_ai_text = phrase_commute_recommendation(commute_ai_recommendation)
 
     assert chat_result.text == commute_ai_text
+
+
+@pytest.mark.asyncio
+async def test_nearest_question_without_coordinates_is_refused_honestly():
+    result = await answer_question("what is the nearest path station to me?")
+
+    assert result.station is None
+    assert "location" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_nearest_question_with_real_coordinates_finds_a_real_station():
+    # Real coordinates right at Journal Square PATH's own location.
+    result = await answer_question(
+        "what is the nearest path station to me?", lat=40.7318097, lng=-74.0628655
+    )
+
+    assert result.station is not None
+    assert result.station.agency == "path"
+    assert result.station.code == "JSQ"
+    assert "Journal Square" in result.text
+
+
+@pytest.mark.asyncio
+async def test_nearest_question_with_no_agency_mentioned_searches_everything():
+    result = await answer_question(
+        "what is the nearest station to me?", lat=40.7318097, lng=-74.0628655
+    )
+
+    assert result.station is not None
+
+
+@pytest.mark.asyncio
+async def test_nearest_question_is_not_treated_as_a_station_name_search():
+    # Real bug found live: "PATH" alone can substring-match real station
+    # names (e.g. NJT bus stops literally named "PATH STATION") - a
+    # nearest-question must never fall through to that search, even when
+    # coordinates ARE provided.
+    result = await answer_question(
+        "what time is the bus at path station", lat=40.7318097, lng=-74.0628655
+    )
+    # Not a "nearest" question at all (no nearest/closest keyword) - this
+    # should still hit the real ambiguous-PATH-STATION path, proving the
+    # nearest-detector doesn't accidentally fire on unrelated questions
+    # just because coordinates happen to be present.
+    assert result.station is None

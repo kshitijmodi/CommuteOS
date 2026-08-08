@@ -94,7 +94,7 @@ void main() {
     // way — this proves it doesn't silently assume a single agency's types.
     final groups = StationGroup.groupByName([
       _mtaStation(stopId: 'X1', complexId: '1', name: 'Newark'),
-      const PathStation(code: 'NWK', name: 'Newark', state: 'NJ'),
+      const PathStation(code: 'NWK', name: 'Newark', state: 'NJ', lat: 40.7344963, lng: -74.1638550),
     ]);
 
     expect(groups.length, 1);

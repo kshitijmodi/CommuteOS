@@ -27,7 +27,7 @@ void main() {
     });
 
     test('PATH station serializes agency as "path"', () {
-      const station = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ');
+      const station = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ', lat: 40.7318097, lng: -74.0628655);
       final candidate = RecommendationCandidate(station: station, routeOrDirection: 'ToNY');
       expect(candidate.toJson()['agency'], 'path');
     });

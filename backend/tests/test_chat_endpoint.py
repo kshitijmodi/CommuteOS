@@ -86,3 +86,30 @@ def test_chat_works_with_no_authorization_header_at_all(client):
     )
 
     assert response.status_code == 200
+
+
+def test_chat_finds_a_real_nearest_station_with_real_coordinates(client):
+    response = client.post(
+        "/chat",
+        json={
+            "question": "what is the nearest path station to me?",
+            "lat": 40.7318097,
+            "lng": -74.0628655,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["station_name"] == "Journal Square"
+    assert body["agency"] == "path"
+
+
+def test_chat_refuses_nearest_question_without_coordinates(client):
+    response = client.post(
+        "/chat", json={"question": "what is the nearest path station to me?"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["station_name"] is None
+    assert "location" in body["answer"].lower()

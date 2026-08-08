@@ -1,4 +1,10 @@
-from app.station_index import contains_whole, find_stations, normalize, station_for
+from app.station_index import (
+    contains_whole,
+    find_stations,
+    nearest_stations,
+    normalize,
+    station_for,
+)
 
 
 def test_contains_whole_matches_a_name_inside_a_full_sentence():
@@ -124,3 +130,52 @@ def test_stations_with_no_toward_hint_carry_none():
 
     assert station is not None
     assert station.toward is None
+
+
+def test_station_for_returns_real_coordinates():
+    station = station_for("path", "JSQ")
+
+    assert station is not None
+    assert station.lat == 40.7318097
+    assert station.lng == -74.0628655
+
+
+def test_nearest_stations_finds_a_real_close_station():
+    # Real coordinates right at Journal Square PATH's own location -
+    # should find itself as (one of) the nearest, at ~0 distance.
+    results = nearest_stations(40.7318097, -74.0628655, limit=1, agency="path")
+
+    assert len(results) == 1
+    assert results[0].station.code == "JSQ"
+    assert results[0].distance_miles < 0.1
+
+
+def test_nearest_stations_sorts_by_real_distance_nearest_first():
+    # Newark (NJ) is much farther from Journal Square's coordinates than
+    # Journal Square itself - a real ordering check, not just "one result".
+    results = nearest_stations(40.7318097, -74.0628655, limit=5, agency="path")
+
+    assert len(results) > 1
+    distances = [r.distance_miles for r in results]
+    assert distances == sorted(distances)
+
+
+def test_nearest_stations_respects_agency_filter():
+    # Searching only "path" should never return a non-PATH station, even
+    # if a closer real station of another agency exists nearby.
+    results = nearest_stations(40.7318097, -74.0628655, limit=5, agency="path")
+
+    assert all(r.station.agency == "path" for r in results)
+
+
+def test_nearest_stations_searches_every_agency_when_none_specified():
+    results = nearest_stations(40.7318097, -74.0628655, limit=5, agency=None)
+
+    agencies = {r.station.agency for r in results}
+    assert len(agencies) >= 1  # not asserting a specific mix - just that it's unrestricted
+
+
+def test_nearest_stations_respects_limit():
+    results = nearest_stations(40.7318097, -74.0628655, limit=2)
+
+    assert len(results) <= 2

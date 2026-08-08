@@ -12,6 +12,15 @@
          background/location permission needed, this is activity
          classification only, not GPS. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
+    <!-- Real GPS coordinates for Chat AI's location-dependent questions
+         ("nearest station to me" - see lib/chat/location_service.dart).
+         Coarse is requested as a fallback; fine is what's actually asked
+         for first since "nearest station" needs real precision, not just
+         a rough area. Foreground-only - no background/"always" location
+         permission, since this is only ever read at the moment a question
+         is sent. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <application
         android:label="CommuteOS"
         android:name="${applicationName}"

@@ -5,7 +5,7 @@ import 'package:http/testing.dart';
 import 'package:commuteos/path/path_service.dart';
 import 'package:commuteos/path/path_station.dart';
 
-const _jsq = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ');
+const _jsq = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ', lat: 40.7318097, lng: -74.0628655);
 
 String _fixture(String lastUpdated) => '''
 {
@@ -124,7 +124,7 @@ void main() {
       client: MockClient((request) async => http.Response(_fixture(fresh), 200)),
     );
 
-    const otherStation = PathStation(code: 'HOB', name: 'Hoboken', state: 'NJ');
+    const otherStation = PathStation(code: 'HOB', name: 'Hoboken', state: 'NJ', lat: 40.7354944, lng: -74.0286157);
     final result = await service.getArrivals(otherStation);
 
     expect(result.arrivalsByDirectionKey['ToNY'], isEmpty);

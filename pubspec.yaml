@@ -53,6 +53,12 @@ dependencies:
   firebase_core: ^3.8.0
   firebase_messaging: ^15.1.6
 
+  # Real device GPS coordinates for Chat AI's location-dependent questions
+  # ("nearest station to me") - see lib/chat/location_service.dart. Only
+  # ever read on-demand right before sending such a question, never polled
+  # in the background.
+  geolocator: ^13.0.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

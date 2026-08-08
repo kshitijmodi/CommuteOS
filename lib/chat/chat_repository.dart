@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../account/api_config.dart';
 import '../account/auth_repository.dart';
+import 'location_service.dart';
 
 /// One answer from Chat AI's stateless tier (see backend/app/chat_ai.py) -
 /// [stationName]/[agency] are non-null only when the backend actually
@@ -44,12 +45,26 @@ class ChatException implements Exception {
 /// sent with no message history attached, matching the backend's own
 /// statelessness (see chat_ai.py's docstring).
 class ChatRepository {
-  ChatRepository({AuthRepository? authRepository, http.Client? client})
-    : _authRepository = authRepository ?? AuthRepository(),
-      _client = client ?? http.Client();
+  ChatRepository({
+    AuthRepository? authRepository,
+    http.Client? client,
+    LocationService? locationService,
+  }) : _authRepository = authRepository ?? AuthRepository(),
+       _client = client ?? http.Client(),
+       _locationService = locationService ?? LocationService();
 
   final AuthRepository _authRepository;
   final http.Client _client;
+  final LocationService _locationService;
+
+  // Mirrors the backend's own _is_nearest_question (see
+  // backend/app/chat_ai.py) - kept in sync deliberately, since asking for
+  // location permission is itself a user-facing moment that should only
+  // ever happen for a question that actually needs it, not every question.
+  static final _nearestPattern = RegExp(
+    r'nearest|closest|near me|close to me',
+    caseSensitive: false,
+  );
 
   Future<ChatAnswer> ask(String question) async {
     final token = await _authRepository.getToken();
@@ -58,10 +73,22 @@ class ChatRepository {
       if (token != null) 'Authorization': 'Bearer $token',
     };
 
+    double? lat;
+    double? lng;
+    if (_nearestPattern.hasMatch(question)) {
+      final location = await _locationService.getCurrentLocation();
+      lat = location.latitude;
+      lng = location.longitude;
+    }
+
     final response = await _client.post(
       Uri.parse('$apiBaseUrl/chat'),
       headers: headers,
-      body: jsonEncode({'question': question}),
+      body: jsonEncode({
+        'question': question,
+        if (lat != null && lng != null) 'lat': lat,
+        if (lat != null && lng != null) 'lng': lng,
+      }),
     );
 
     if (response.statusCode != 200) {

@@ -10,7 +10,7 @@ import 'package:commuteos/transit/station_group.dart';
 import 'package:commuteos/transit/station_picker_sheet.dart';
 import 'package:commuteos/transit/transit_models.dart';
 
-const _path = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ');
+const _path = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ', lat: 40.7318097, lng: -74.0628655);
 const _njtRail = NjtRailStation(code: 'JSQ', name: 'Journal Square', lines: ['NEC']);
 const _njtBus1 = NjtBusStop(stopId: '1', name: 'Journal Square', routeNames: ['1']);
 const _njtBus2 = NjtBusStop(stopId: '2', name: 'Journal Square', routeNames: ['2']);

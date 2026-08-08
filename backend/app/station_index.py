@@ -22,10 +22,18 @@ no accuracy gain at this vocabulary size.
 """
 
 import csv
+import math
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
+
+# Mean Earth radius in miles - used by nearest_stations's haversine
+# distance calculation. A sphere, not an ellipsoid, is plenty accurate
+# for "which station is closest" at NYC-metro distances (a few miles at
+# most) - the ellipsoid-vs-sphere error is on the order of tenths of a
+# percent, far smaller than GPS's own real-world accuracy.
+_EARTH_RADIUS_MILES = 3958.8
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,14 @@ class StationMatch:
     # intersection) instead of presenting two options that render
     # identically - a real bug found live, see OPEN_QUESTIONS.md.
     toward: str | None = None
+    # Real coordinates for every station in the index (added 2026-08-08
+    # for "nearest station to me" - see nearest_stations). None only if a
+    # row's lat/lng genuinely failed to parse, which should not happen
+    # for any real row in the index - treated as "cannot be used for a
+    # distance calculation," never defaulted to 0.0/0.0 (a real place on
+    # Earth, not a safe stand-in for "unknown").
+    lat: float | None = None
+    lng: float | None = None
 
 
 def normalize(text: str) -> str:
@@ -67,6 +83,8 @@ def _all_stations() -> list[StationMatch]:
         for record in csv.DictReader(f):
             routes = [r for r in record["routes"].split("|") if r]
             toward = record.get("toward") or None
+            lat = _parse_float(record.get("lat"))
+            lng = _parse_float(record.get("lng"))
             stations.append(
                 StationMatch(
                     name=record["name"],
@@ -74,6 +92,8 @@ def _all_stations() -> list[StationMatch]:
                     code=record["code"],
                     routes=routes,
                     toward=toward,
+                    lat=lat,
+                    lng=lng,
                 )
             )
     return stations
@@ -129,3 +149,54 @@ def station_for(agency: str, code: str) -> StationMatch | None:
         if station.agency == agency and station.code == code:
             return station
     return None
+
+
+def _parse_float(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True)
+class NearbyStation:
+    station: StationMatch
+    distance_miles: float
+
+
+def nearest_stations(
+    lat: float, lng: float, limit: int = 3, agency: str | None = None
+) -> list[NearbyStation]:
+    """Real haversine great-circle distance from (lat, lng) to every
+    station in the index that actually has real coordinates (see
+    StationMatch.lat/lng's docstring - a station with no parsed
+    coordinate is silently excluded here, never treated as
+    distance-zero). Sorted nearest-first. [agency] optionally narrows to
+    one agency (e.g. "path" for "nearest PATH station") - None searches
+    every agency. Empty list (never a guess) if nothing in scope has
+    real coordinates to compare against.
+    """
+    candidates = [s for s in _all_stations() if s.lat is not None and s.lng is not None]
+    if agency is not None:
+        candidates = [s for s in candidates if s.agency == agency]
+
+    results = [
+        NearbyStation(station=s, distance_miles=_haversine_miles(lat, lng, s.lat, s.lng))
+        for s in candidates
+    ]
+    results.sort(key=lambda r: r.distance_miles)
+    return results[:limit]
+
+
+def _haversine_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    lat1_r, lng1_r, lat2_r, lng2_r = map(math.radians, (lat1, lng1, lat2, lng2))
+    delta_lat = lat2_r - lat1_r
+    delta_lng = lng2_r - lng1_r
+    a = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(delta_lng / 2) ** 2
+    )
+    c = 2 * math.asin(math.sqrt(a))
+    return _EARTH_RADIUS_MILES * c

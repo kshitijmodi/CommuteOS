@@ -12,6 +12,15 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 class ChatRequest(BaseModel):
     question: str
+    # The caller's real device coordinates, sent only when the client has
+    # real location permission AND the question is worth including them
+    # for (see lib/chat/chat_repository.dart) - optional, since most
+    # questions have nothing to do with location and most callers won't
+    # have granted the permission at all. Both must be present together
+    # for either to be used; a single stray one is ignored the same as
+    # neither being sent.
+    lat: float | None = None
+    lng: float | None = None
 
 
 class ChatResponse(BaseModel):
@@ -41,6 +50,8 @@ async def ask_chat(
         payload.question,
         db=db,
         user_id=current_user.id if current_user else None,
+        lat=payload.lat,
+        lng=payload.lng,
     )
     return ChatResponse(
         answer=result.text,
