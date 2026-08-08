@@ -59,6 +59,12 @@ dependencies:
   # in the background.
   geolocator: ^13.0.2
 
+  # Generates the real per-conversation session id Chat AI's server-side
+  # memory is keyed on (see lib/chat/chat_repository.dart) - already a
+  # transitive dependency via geolocator, declared explicitly since it's
+  # now used directly, same convention as fixnum below.
+  uuid: ^4.6.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

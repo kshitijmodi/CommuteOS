@@ -1,10 +1,11 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app.chat_ai import answer_question
 from app.core.security import hash_password
-from app.models import Trip, User
+from app.models import ChatMessage, ChatSession, Trip, User
 from app.transit.models import Arrival, ArrivalsResult
 
 
@@ -266,3 +267,121 @@ async def test_nearest_question_is_not_treated_as_a_station_name_search():
     # nearest-detector doesn't accidentally fire on unrelated questions
     # just because coordinates happen to be present.
     assert result.station is None
+
+
+# --- Real conversation memory (2026-08-08) ---
+# Found live: every question was answered with zero memory of the
+# conversation so far, by design - but that design read to users as "not
+# maintaining context," since nothing ever surfaced the limitation. These
+# tests prove the real fix: a session's actual prior turns, stored
+# server-side, both resolve station-less follow-ups and get handed to the
+# LLM as real conversation history.
+
+
+@pytest.mark.asyncio
+async def test_no_session_id_behaves_exactly_as_before_stateless(db_session):
+    # A caller with no session_id (every call site before this feature
+    # existed) must still get a real single-turn answer - conversation
+    # memory is additive, never a new requirement to answer at all.
+    result = await answer_question("Grove Street", db=db_session)
+
+    assert result.station is not None
+    assert result.station.code == "GRV"
+    # Nothing should have been persisted with no session_id to attach to.
+    assert db_session.query(ChatMessage).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_real_session_persists_its_turns(db_session):
+    session_id = uuid.uuid4()
+
+    await answer_question("Grove Street", db=db_session, session_id=session_id)
+
+    session = db_session.get(ChatSession, session_id)
+    assert session is not None
+
+    messages = (
+        db_session.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at)
+        .all()
+    )
+    assert len(messages) == 2
+    assert messages[0].role == "user"
+    assert messages[0].content == "Grove Street"
+    assert messages[1].role == "assistant"
+    assert messages[1].station_agency == "path"
+    assert messages[1].station_code == "GRV"
+
+
+@pytest.mark.asyncio
+async def test_a_station_less_follow_up_resolves_against_the_real_last_station(db_session):
+    # Real bug this fixes: "what about the other direction" (or any
+    # question naming no station) used to fail with "I couldn't find a
+    # station" even immediately after asking about a specific one.
+    session_id = uuid.uuid4()
+
+    await answer_question("Grove Street", db=db_session, session_id=session_id)
+    follow_up = await answer_question(
+        "what time is the next one", db=db_session, session_id=session_id
+    )
+
+    assert follow_up.station is not None
+    assert follow_up.station.code == "GRV"
+    assert "min" in follow_up.text
+
+
+@pytest.mark.asyncio
+async def test_a_station_less_question_with_no_prior_turns_still_asks_for_clarification(
+    db_session,
+):
+    # A fresh session with no history yet has nothing real to fall back
+    # to - must still refuse honestly, not guess a station out of thin
+    # air just because a session_id was provided.
+    session_id = uuid.uuid4()
+
+    result = await answer_question(
+        "what time is the next one", db=db_session, session_id=session_id
+    )
+
+    assert result.station is None
+    assert "couldn't find a station" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_different_sessions_never_share_history(db_session):
+    # Two independent conversations (e.g. two different anonymous
+    # devices) must never leak context into each other.
+    session_a = uuid.uuid4()
+    session_b = uuid.uuid4()
+
+    await answer_question("Grove Street", db=db_session, session_id=session_a)
+    result = await answer_question(
+        "what time is the next one", db=db_session, session_id=session_b
+    )
+
+    assert result.station is None
+    assert "couldn't find a station" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_history_is_capped_to_the_most_recent_turns(db_session):
+    # Real gotcha this guards against: an unbounded history would grow
+    # every LLM prompt forever over a long-running conversation - only
+    # the most recent _MAX_HISTORY_TURNS should ever be loaded.
+    from app.chat_ai import _MAX_HISTORY_TURNS, _load_recent_history
+
+    session_id = uuid.uuid4()
+    db_session.add(ChatSession(id=session_id))
+    db_session.commit()
+    for i in range(_MAX_HISTORY_TURNS + 5):
+        db_session.add(
+            ChatMessage(session_id=session_id, role="user", content=f"question {i}")
+        )
+    db_session.commit()
+
+    history = _load_recent_history(db_session, session_id)
+
+    assert len(history) == _MAX_HISTORY_TURNS
+    # Oldest-first, and genuinely the most RECENT turns, not the oldest.
+    assert history[-1].content == f"question {_MAX_HISTORY_TURNS + 4}"

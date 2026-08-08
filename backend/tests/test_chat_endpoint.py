@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -113,3 +114,36 @@ def test_chat_refuses_nearest_question_without_coordinates(client):
     body = response.json()
     assert body["station_name"] is None
     assert "location" in body["answer"].lower()
+
+
+def test_chat_remembers_the_station_across_a_real_session(client):
+    # End-to-end proof (through the real HTTP endpoint, not just
+    # answer_question directly) that a station-less follow-up resolves
+    # using a real session_id sent by the client.
+    session_id = str(uuid.uuid4())
+
+    first = client.post(
+        "/chat",
+        json={"question": "what's next from Grove Street", "session_id": session_id},
+    )
+    assert first.json()["station_name"] == "Grove Street"
+
+    follow_up = client.post(
+        "/chat",
+        json={"question": "what time is the next one", "session_id": session_id},
+    )
+
+    assert follow_up.status_code == 200
+    assert follow_up.json()["station_name"] == "Grove Street"
+
+
+def test_chat_without_a_session_id_has_no_memory_between_calls(client):
+    # No session_id at all (an old client, or a deliberately fresh
+    # question) must behave exactly as before this feature existed - no
+    # memory, no fallback, a station-less question just asks to clarify.
+    client.post("/chat", json={"question": "what's next from Grove Street"})
+
+    follow_up = client.post("/chat", json={"question": "what time is the next one"})
+
+    assert follow_up.status_code == 200
+    assert follow_up.json()["station_name"] is None

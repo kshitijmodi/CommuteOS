@@ -109,4 +109,44 @@ void main() {
 
     expect(wasCalled, isFalse);
   });
+
+  testWidgets('the "New chat" action is hidden until a message exists', (tester) async {
+    final repository = ChatRepository(
+      client: MockClient(
+        (request) async => http.Response('{"answer":"ok"}', 200),
+      ),
+    );
+
+    await tester.pumpWidget(_wrap(ChatScreen(chatRepository: repository)));
+
+    expect(find.byIcon(Icons.add_comment_outlined), findsNothing);
+  });
+
+  testWidgets('"New chat" clears the transcript and starts a real new session', (
+    tester,
+  ) async {
+    final repository = ChatRepository(
+      client: MockClient(
+        (request) async => http.Response(
+          '{"answer":"The next PATH train is in 7 min.",'
+          '"station_name":"Grove Street","agency":"path"}',
+          200,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(_wrap(ChatScreen(chatRepository: repository)));
+
+    await tester.enterText(find.byType(TextField), 'what\'s next from Grove Street');
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.add_comment_outlined), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.add_comment_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('what\'s next from Grove Street'), findsNothing);
+    expect(find.textContaining('Ask about any station'), findsOneWidget);
+  });
 }

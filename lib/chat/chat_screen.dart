@@ -12,12 +12,13 @@ class _Message {
   final bool isError;
 }
 
-/// Chat AI's stateless tier (see backend/app/chat_ai.py) - free-text
-/// questions about real-time transit answered from live feed data only, no
-/// account required. Deliberately stateless on this side too: every
-/// question is sent independently with no conversation history attached,
-/// matching the backend's own statelessness - the personalized tier (which
-/// would read Behavior AI's history) isn't built yet.
+/// Chat AI (see backend/app/chat_ai.py) - free-text questions about
+/// real-time transit, no account required. Real conversation memory
+/// (added 2026-08-08): the same persistent session id is sent with every
+/// question (see ChatRepository), so a follow-up like "what about the
+/// other direction" is resolved against what was actually said earlier -
+/// the "New chat" action in the app bar starts a genuinely fresh session
+/// when the user wants a clean slate.
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, this.chatRepository});
 
@@ -89,10 +90,25 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  Future<void> _startNewChat() async {
+    await _chatRepository.startNewConversation();
+    setState(() => _messages.clear());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ask CommuteOS')),
+      appBar: AppBar(
+        title: const Text('Ask CommuteOS'),
+        actions: [
+          if (_messages.isNotEmpty)
+            IconButton(
+              onPressed: _isSending ? null : _startNewChat,
+              icon: const Icon(Icons.add_comment_outlined),
+              tooltip: 'New chat',
+            ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(

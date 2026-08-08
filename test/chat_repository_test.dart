@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -198,6 +200,46 @@ void main() {
       expect(fakeLocation.callCount, 1);
       expect(capturedRequest!.body, isNot(contains('lat')));
       expect(capturedRequest!.body, isNot(contains('lng')));
+    });
+
+    test('sends the same real session id with every question - real conversation memory', () async {
+      final requests = <http.Request>[];
+      final repository = ChatRepository(
+        client: MockClient((request) async {
+          requests.add(request);
+          return http.Response('{"answer":"ok"}', 200);
+        }),
+      );
+
+      await repository.ask('what\'s next from Grove Street');
+      await repository.ask('what time is the next one');
+
+      expect(requests, hasLength(2));
+      final firstBody = jsonDecode(requests[0].body) as Map<String, dynamic>;
+      final secondBody = jsonDecode(requests[1].body) as Map<String, dynamic>;
+      expect(firstBody['session_id'], isNotNull);
+      // The SAME real id both times - this is what lets the backend
+      // resolve the second question as a follow-up to the first, not two
+      // unrelated single-turn questions.
+      expect(secondBody['session_id'], firstBody['session_id']);
+    });
+
+    test('startNewConversation makes the NEXT question use a different session id', () async {
+      final requests = <http.Request>[];
+      final repository = ChatRepository(
+        client: MockClient((request) async {
+          requests.add(request);
+          return http.Response('{"answer":"ok"}', 200);
+        }),
+      );
+
+      await repository.ask('what\'s next from Grove Street');
+      await repository.startNewConversation();
+      await repository.ask('what\'s next from Hoboken');
+
+      final firstBody = jsonDecode(requests[0].body) as Map<String, dynamic>;
+      final secondBody = jsonDecode(requests[1].body) as Map<String, dynamic>;
+      expect(secondBody['session_id'], isNot(firstBody['session_id']));
     });
   });
 }

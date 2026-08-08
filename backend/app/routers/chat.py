@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -21,6 +23,13 @@ class ChatRequest(BaseModel):
     # neither being sent.
     lat: float | None = None
     lng: float | None = None
+    # A real conversation id, client-generated once and persisted
+    # on-device (see lib/chat/chat_repository.dart) - optional, since a
+    # caller with no session id (an old client, or one that intentionally
+    # wants a fresh single-turn question) still gets a real answer, just
+    # with no conversation memory. See chat_ai.answer_question's
+    # session_id docs for what this actually unlocks.
+    session_id: uuid.UUID | None = None
 
 
 class ChatResponse(BaseModel):
@@ -52,6 +61,7 @@ async def ask_chat(
         user_id=current_user.id if current_user else None,
         lat=payload.lat,
         lng=payload.lng,
+        session_id=payload.session_id,
     )
     return ChatResponse(
         answer=result.text,

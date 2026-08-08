@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../account/api_config.dart';
 import '../account/auth_repository.dart';
+import 'chat_session_store.dart';
 import 'location_service.dart';
 
 /// One answer from Chat AI's stateless tier (see backend/app/chat_ai.py) -
@@ -40,22 +41,31 @@ class ChatException implements Exception {
 /// needs an account" pattern: if the user happens to be logged in, this
 /// attaches their token so a personal-sounding question ("what do I
 /// usually take from here") can use the personalized tier; a logged-out
-/// caller still gets the real stateless tier, never an error. Fully
-/// stateless in the conversational sense either way: each question is
-/// sent with no message history attached, matching the backend's own
-/// statelessness (see chat_ai.py's docstring).
+/// caller still gets the real stateless tier, never an error.
+///
+/// Real conversation memory (added 2026-08-08, see
+/// backend/app/chat_ai.py's module docstring): every question used to be
+/// answered with zero memory of the conversation so far - found live,
+/// after it read to a real user as the app "not maintaining context."
+/// Every call now sends the same persistent session id (see
+/// ChatSessionStore) so a follow-up question ("what about the other
+/// direction") can be resolved against what was actually asked and
+/// answered before it, server-side.
 class ChatRepository {
   ChatRepository({
     AuthRepository? authRepository,
     http.Client? client,
     LocationService? locationService,
+    ChatSessionStore? sessionStore,
   }) : _authRepository = authRepository ?? AuthRepository(),
        _client = client ?? http.Client(),
-       _locationService = locationService ?? LocationService();
+       _locationService = locationService ?? LocationService(),
+       _sessionStore = sessionStore ?? ChatSessionStore();
 
   final AuthRepository _authRepository;
   final http.Client _client;
   final LocationService _locationService;
+  final ChatSessionStore _sessionStore;
 
   // Mirrors the backend's own _is_nearest_question (see
   // backend/app/chat_ai.py) - kept in sync deliberately, since asking for
@@ -81,6 +91,8 @@ class ChatRepository {
       lng = location.longitude;
     }
 
+    final sessionId = await _sessionStore.getSessionId();
+
     final response = await _client.post(
       Uri.parse('$apiBaseUrl/chat'),
       headers: headers,
@@ -88,6 +100,7 @@ class ChatRepository {
         'question': question,
         if (lat != null && lng != null) 'lat': lat,
         if (lat != null && lng != null) 'lng': lng,
+        'session_id': sessionId,
       }),
     );
 
@@ -97,6 +110,11 @@ class ChatRepository {
 
     return ChatAnswer.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
+
+  /// Starts a genuinely new conversation - see
+  /// ChatSessionStore.startNewSession. Exposed here so ChatScreen's "New
+  /// chat" action doesn't need to know the session store exists at all.
+  Future<void> startNewConversation() => _sessionStore.startNewSession();
 
   String _extractErrorDetail(http.Response response) {
     try {

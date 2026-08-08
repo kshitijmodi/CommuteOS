@@ -22,45 +22,77 @@ Pipeline, deliberately linear and inspectable (no agentic tool-calling
 loop - the LLM never decides what to fetch, it only phrases what this
 module already fetched deterministically):
 1. station_index.find_stations() resolves the question's station name.
-   Zero matches -> ask the user to clarify (real refusal, not a guess).
-   Multiple matches -> list the real options, let the user pick.
+   Zero matches -> fall back to the real last-mentioned station in this
+   conversation (see _last_mentioned_station), if one exists; still zero
+   -> ask the user to clarify (real refusal, not a guess). Multiple
+   matches -> list the real options, let the user pick.
 2. A personal question, a logged-in user, and an unambiguous match ->
    try the personalized path first (see above). Anything else, or that
    path coming back empty -> the stateless path: fetch REAL live arrivals
    across every route/direction that agency's station serves (never a
    single arbitrarily-picked route/direction - a chat question doesn't
    specify one the way an app screen selection would).
-3. Phrase the real fetched data into an answer. The LLM's job is exactly
-   as narrow as llm_phrasing.py's: turn real structured data into a
-   sentence, never invent a number, never answer a question with no real
-   data behind it (fares, crowding, anything outside NYC-metro transit) -
-   it must refuse those plainly instead of guessing.
+3. Phrase the real fetched data into an answer, giving the LLM the
+   session's real recent turns as conversation history so it can resolve
+   a reference like "what about the other direction" - never inventing
+   a fact not present in either the live data or that real history. The
+   LLM's job is exactly as narrow as llm_phrasing.py's: turn real
+   structured data into a sentence, never invent a number, never answer
+   a question with no real data behind it (fares, crowding, anything
+   outside NYC-metro transit) - it must refuse those plainly instead of
+   guessing.
+
+Real conversation memory (added 2026-08-08, see OPEN_QUESTIONS.md): found
+live that every question was answered with zero memory of the
+conversation so far - by design, but that design read to users as "not
+maintaining context," a fair complaint since nothing surfaced the
+limitation. chat_session.py's ChatSession/ChatMessage store the literal
+transcript server-side, keyed by a CLIENT-generated session id (works for
+anonymous callers too, same as everything else in this app). This module
+never re-derives history from message text with an LLM call - it's a
+plain read of what was actually said, same "real data only" posture as
+every other piece of this feature.
 """
 
+import uuid
 from dataclasses import dataclass
 
 from openai import OpenAI, OpenAIError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .commute_engine import recommend_for_station
 from .core.config import settings
 from .llm_phrasing import phrase_commute_recommendation
-from .models import User
+from .models import ChatMessage, ChatSession, User
 from .station_index import (
     StationMatch,
     contains_whole,
     find_stations,
     nearest_stations,
     normalize,
+    station_for,
 )
 from .transit import lirr, mta, njt_bus, njt_rail, path
 from .transit.models import Arrival, ArrivalsResult
 
 _MAX_ARRIVALS_IN_ANSWER = 5
+# How many of the session's most recent turns are given to the LLM as
+# real conversation history - bounded so a very long-running chat doesn't
+# grow the prompt unboundedly; recent turns are what a follow-up question
+# actually needs, not the full history from hours ago.
+_MAX_HISTORY_TURNS = 8
 
 _SYSTEM_PROMPT = """You are CommuteOS's transit chat assistant, scoped \
 strictly to NYC-metro subway/rail/bus arrival times (MTA, PATH, NJ \
 Transit rail and bus, LIRR).
+
+Real recent turns of this same conversation may be included as prior \
+chat messages before the current question - use them only to understand \
+what a follow-up question is referring to (e.g. "what about the other \
+direction" means the direction opposite whatever station/direction was \
+just discussed). Never invent a fact that isn't in either the real \
+context given below or that real prior conversation.
 
 You will be given a JSON object with the user's question and a "context" \
 field. The context is one of:
@@ -142,22 +174,34 @@ def _template_answer(context: dict) -> str:
     return f"The next arrival at {station} is {soonest['route_label']} in about {soonest['minutes_until']} min."
 
 
-def _ask_llm(question: str, context: dict) -> str | None:
+def _ask_llm(
+    question: str, context: dict, history: list[ChatMessage] | None = None
+) -> str | None:
+    """[history] is the session's real prior turns, oldest first (see
+    _load_recent_history) - included as real prior chat messages so the
+    LLM can resolve a reference like "what about the other direction"
+    against what was actually said, not asked to guess. None/empty (the
+    default, and every call site before conversation memory existed)
+    means no history - behaves exactly as before.
+    """
     if not settings.groq_api_key:
         return None
 
     client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
     payload = {"question": question, "context": context}
 
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    for turn in history or []:
+        role = "assistant" if turn.role == "assistant" else "user"
+        messages.append({"role": role, "content": turn.content})
+    messages.append({"role": "user", "content": str(payload)})
+
     try:
         response = client.chat.completions.create(
             model=settings.groq_model,
             temperature=0.2,
             max_tokens=200,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": str(payload)},
-            ],
+            messages=messages,
         )
         text = response.choices[0].message.content
         return text.strip() if text else None
@@ -283,7 +327,10 @@ def _agency_mentioned(question: str) -> str | None:
 
 
 def _answer_nearest_question(
-    question: str, lat: float | None, lng: float | None
+    question: str,
+    lat: float | None,
+    lng: float | None,
+    history: list[ChatMessage] | None = None,
 ) -> ChatAnswer:
     """Answers a "nearest/closest station to me" question using the
     client's real coordinates - see answer_question's lat/lng docs and
@@ -298,14 +345,14 @@ def _answer_nearest_question(
     """
     if lat is None or lng is None:
         context = {"kind": "no_location"}
-        text = _ask_llm(question, context) or _template_answer(context)
+        text = _ask_llm(question, context, history) or _template_answer(context)
         return ChatAnswer(text=text, station=None)
 
     agency = _agency_mentioned(question)
     nearby = nearest_stations(lat, lng, limit=1, agency=agency)
     if not nearby:
         context = {"kind": "no_location"}
-        text = _ask_llm(question, context) or _template_answer(context)
+        text = _ask_llm(question, context, history) or _template_answer(context)
         return ChatAnswer(text=text, station=None)
 
     nearest = nearby[0]
@@ -315,8 +362,69 @@ def _answer_nearest_question(
         "agency": nearest.station.agency,
         "distance_miles": round(nearest.distance_miles, 1),
     }
-    text = _ask_llm(question, context) or _template_answer(context)
+    text = _ask_llm(question, context, history) or _template_answer(context)
     return ChatAnswer(text=text, station=nearest.station)
+
+
+def _load_recent_history(db: Session, session_id: uuid.UUID) -> list[ChatMessage]:
+    """The session's real last _MAX_HISTORY_TURNS turns, oldest first -
+    a plain read of what was actually said (see the module docstring's
+    "never re-derive history" note), never a summary or guess.
+    """
+    rows = db.scalars(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.id.desc())
+        .limit(_MAX_HISTORY_TURNS)
+    ).all()
+    return list(reversed(rows))
+
+
+def _last_mentioned_station(history: list[ChatMessage]) -> StationMatch | None:
+    """The most recent real station an assistant turn in this session
+    actually resolved to - what a station-less follow-up ("what about
+    the other direction", "what time's the next one") falls back to
+    instead of failing with "no match." Walks newest-first; None if no
+    turn in the given history ever landed on a real station (never
+    invents one).
+    """
+    for turn in reversed(history):
+        if turn.role == "assistant" and turn.station_agency and turn.station_code:
+            match = station_for(turn.station_agency, turn.station_code)
+            if match is not None:
+                return match
+    return None
+
+
+def _save_turn(
+    db: Session,
+    session_id: uuid.UUID,
+    role: str,
+    content: str,
+    station: StationMatch | None = None,
+) -> None:
+    db.add(
+        ChatMessage(
+            session_id=session_id,
+            role=role,
+            content=content,
+            station_agency=station.agency if station else None,
+            station_code=station.code if station else None,
+        )
+    )
+    db.commit()
+
+
+def _ensure_session(db: Session, session_id: uuid.UUID, user_id=None) -> None:
+    """Creates the session row on its first real message if it doesn't
+    exist yet - the client mints the id (see the module docstring), so
+    the backend never needs to hand one out; this just makes sure a
+    matching row exists to hang messages off before the first insert.
+    """
+    existing = db.get(ChatSession, session_id)
+    if existing is None:
+        db.add(ChatSession(id=session_id, user_id=user_id))
+        db.commit()
 
 
 async def answer_question(
@@ -325,6 +433,7 @@ async def answer_question(
     user_id=None,
     lat: float | None = None,
     lng: float | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> ChatAnswer:
     """[db]/[user_id] are only used for the personalized tier - both None
     (the stateless caller's default) means "never attempt personalization,"
@@ -338,21 +447,50 @@ async def answer_question(
     ignored entirely for every other question. Both None (no coordinates
     sent, or the question isn't location-dependent) is the normal case
     for most questions and callers.
+
+    [session_id] is the client-generated conversation id (see the module
+    docstring's "real conversation memory" section) - None (the default,
+    matching every call site before this existed, e.g. direct test calls)
+    means no history is loaded or saved, same single-turn behavior as
+    before. A real UUID with a real [db] session both loads this
+    conversation's recent turns for the LLM and persists this new
+    question+answer as the next turn.
     """
+    history = (
+        _load_recent_history(db, session_id) if db is not None and session_id else []
+    )
+
     if _is_nearest_question(question):
-        return _answer_nearest_question(question, lat, lng)
+        answer = _answer_nearest_question(question, lat, lng, history)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
 
     if _is_out_of_scope(question):
         context = {"kind": "out_of_scope"}
-        text = _ask_llm(question, context) or _template_answer(context)
-        return ChatAnswer(text=text, station=None)
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        answer = ChatAnswer(text=text, station=None)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
 
     matches = find_stations(question)
 
     if not matches:
+        # No station name in THIS question - a real prior turn in this
+        # same conversation may still resolve it (e.g. "what time's the
+        # next one" right after asking about a specific station). Only
+        # ever falls back to a station this session's own history
+        # actually named, never a guess synthesized from the question.
+        fallback = _last_mentioned_station(history)
+        if fallback is not None:
+            answer = await _answer_for_match(question, fallback, db, user_id, history)
+            _persist_turn(db, session_id, user_id, question, answer)
+            return answer
+
         context = {"kind": "no_match"}
-        text = _ask_llm(question, context) or _template_answer(context)
-        return ChatAnswer(text=text, station=None)
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        answer = ChatAnswer(text=text, station=None)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
 
     if not _is_unambiguous(question, matches):
         context = {
@@ -361,11 +499,30 @@ async def answer_question(
                 {"name": m.name, "agency": m.agency, "toward": m.toward} for m in matches
             ],
         }
-        text = _ask_llm(question, context) or _template_answer(context)
-        return ChatAnswer(text=text, station=None)
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        answer = ChatAnswer(text=text, station=None)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
 
     match = matches[0]
+    answer = await _answer_for_match(question, match, db, user_id, history)
+    _persist_turn(db, session_id, user_id, question, answer)
+    return answer
 
+
+async def _answer_for_match(
+    question: str,
+    match: StationMatch,
+    db: Session | None,
+    user_id,
+    history: list[ChatMessage],
+) -> ChatAnswer:
+    """The shared "we have one real unambiguous station, now answer"
+    tail of the pipeline - factored out so both a question that names its
+    own station and a station-less follow-up resolved via
+    _last_mentioned_station go through the exact same personalized/
+    stateless logic, not two copies of it.
+    """
     if db is not None and user_id is not None and _is_personal_question(question):
         personalized = await _try_personalized_answer(db, user_id, match)
         if personalized is not None:
@@ -389,8 +546,27 @@ async def answer_question(
         ],
         "is_live": result.is_live,
     }
-    text = _ask_llm(question, context) or _template_answer(context)
+    text = _ask_llm(question, context, history) or _template_answer(context)
     return ChatAnswer(text=text, station=match)
+
+
+def _persist_turn(
+    db: Session | None,
+    session_id: uuid.UUID | None,
+    user_id,
+    question: str,
+    answer: ChatAnswer,
+) -> None:
+    """Saves this real question+answer as the conversation's next two
+    turns - a no-op when there's no session to attach them to (session_id
+    is None, e.g. every call site/test that predates conversation memory)
+    so this never becomes a hard requirement for answering a question.
+    """
+    if db is None or session_id is None:
+        return
+    _ensure_session(db, session_id, user_id)
+    _save_turn(db, session_id, "user", question)
+    _save_turn(db, session_id, "assistant", answer.text, answer.station)
 
 
 async def _try_personalized_answer(db: Session, user_id, match: StationMatch) -> ChatAnswer | None:
