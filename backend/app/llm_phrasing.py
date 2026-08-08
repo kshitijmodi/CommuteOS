@@ -18,11 +18,20 @@ recommendation at all, and this is explicitly a "nice to have" layer per
 the PRD (phrasing only, never the decision).
 """
 
+from typing import TYPE_CHECKING
+
 from openai import OpenAI, OpenAIError
 
 from .core.config import settings
 from .decision_engine import RankedRoute
 from .schedule_engine import DisruptionAssessment, DisruptionSeverity
+
+if TYPE_CHECKING:
+    # Import-time only, never at runtime - commute_engine.py imports
+    # recommendation_builder.py, which imports THIS module, so a real
+    # top-level import here would be a circular import. TYPE_CHECKING
+    # guards keep the type hint below without ever executing the import.
+    from .commute_engine import CommuteRecommendation
 
 _SYSTEM_PROMPT = """You are a transit assistant. You will be given a single \
 JSON object describing one recommended route: mode, label, predicted \
@@ -264,3 +273,92 @@ def _template_schedule_phrase(
         delay = round(assessment.delay_minutes or 0)
         return f"Your usual {usual_label} looks about {delay} min later than normal today, arriving around {time_str}."
     return f"Your usual {usual_label} is on schedule, arriving around {time_str}."
+
+
+_COMMUTE_SYSTEM_PROMPT = """You are CommuteOS's Commute AI - you tell a \
+commuter, standing at a station right now, which real option there is \
+fastest/most reliable. You will be given a JSON object with a "winner" \
+(the recommended option), an "alternatives" list (every other real \
+option considered), and a "usual" field - either null (no known usual \
+pick for this person here) or a string naming their inferred usual \
+choice.
+
+Write ONE short sentence (under 220 characters), natural and direct:
+- If "usual" is null, or "usual" equals the winner's own label, just \
+recommend the winner and cite its real predicted_arrival time.
+- If "usual" is a DIFFERENT label than the winner, explicitly say to \
+take the winner INSTEAD of their usual pick, and say why (sooner, or \
+more reliable) by comparing the real numbers yourself.
+
+Rules you must never break:
+- Only use the numbers/times/labels given to you - never invent one.
+- The real reason the winner won is either it arrives sooner, or it's \
+more reliable (higher confidence) - name whichever one actually applies.
+- Reflect confidence honestly - hedge ("looks like", "should") when \
+confidence is below 0.6.
+- Do not mention "confidence" or "score" as words.
+- Output only the sentence, no preamble, no quotes around it."""
+
+
+def phrase_commute_recommendation(recommendation: "CommuteRecommendation") -> str:
+    """Commute AI's phrasing entry point - same narrow, fail-soft posture
+    as every other phrase_* function here. Deliberately takes the whole
+    CommuteRecommendation rather than separate args (unlike the schedule/
+    comparison functions) since this is the newest caller and there's no
+    existing call-site convention to match.
+    """
+    if not settings.groq_api_key:
+        return _template_commute_phrase(recommendation)
+
+    client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+
+    def _payload(route: RankedRoute) -> dict:
+        return {
+            "mode": route.mode,
+            "label": route.label,
+            "predicted_arrival": route.predicted_arrival.isoformat(),
+            "confidence": round(route.confidence, 2),
+        }
+
+    payload = {
+        "winner": _payload(recommendation.winner),
+        "alternatives": [_payload(r) for r in recommendation.alternatives],
+        "usual": recommendation.usual_route_or_direction,
+    }
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.groq_model,
+            temperature=0.2,
+            max_tokens=120,
+            messages=[
+                {"role": "system", "content": _COMMUTE_SYSTEM_PROMPT},
+                {"role": "user", "content": str(payload)},
+            ],
+        )
+        text = response.choices[0].message.content
+        return text.strip() if text else _template_commute_phrase(recommendation)
+    except OpenAIError:
+        return _template_commute_phrase(recommendation)
+
+
+def _template_commute_phrase(recommendation: "CommuteRecommendation") -> str:
+    winner = recommendation.winner
+    time_str = winner.predicted_arrival.strftime("%I:%M %p").lstrip("0")
+    hedge = "should" if winner.confidence >= 0.6 else "might"
+
+    if not recommendation.differs_from_usual:
+        return f"Take the {winner.label} - it {hedge} arrive around {time_str}."
+
+    usual_alt = next(
+        (a for a in recommendation.alternatives if a.label == recommendation.usual_route_or_direction),
+        None,
+    )
+    if usual_alt is not None and winner.predicted_arrival < usual_alt.predicted_arrival:
+        reason = "sooner than your usual"
+    else:
+        reason = "more reliable right now than your usual"
+    return (
+        f"Take the {winner.label} instead of your usual {recommendation.usual_route_or_direction} - "
+        f"it {hedge} arrive around {time_str}, {reason}."
+    )

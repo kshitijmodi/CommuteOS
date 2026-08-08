@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
+from app.commute_engine import CommuteRecommendation
 from app.decision_engine import RankedRoute
 from app.llm_phrasing import (
     _template_comparison_phrase,
+    _template_commute_phrase,
     _template_phrase,
     _template_schedule_phrase,
     phrase_comparison,
+    phrase_commute_recommendation,
     phrase_recommendation,
     phrase_schedule_notification,
 )
@@ -136,3 +139,52 @@ def test_phrase_schedule_notification_falls_back_to_template_when_no_api_key(mon
 
     assert "R20N" in text
     assert "8:10" in text
+
+
+def test_commute_template_recommends_plainly_when_it_matches_usual():
+    winner = _route(mode="mta", label="N", minutes_from_now=5)
+    recommendation = CommuteRecommendation(
+        winner=winner, alternatives=[], usual_route_or_direction="N", differs_from_usual=False
+    )
+
+    text = _template_commute_phrase(recommendation)
+
+    assert "instead" not in text
+    assert "N" in text
+
+
+def test_commute_template_cites_taking_x_instead_when_it_differs_and_is_sooner():
+    winner = _route(mode="mta", label="N", minutes_from_now=5)
+    usual = _route(mode="mta", label="W", minutes_from_now=10)
+    recommendation = CommuteRecommendation(
+        winner=winner, alternatives=[usual], usual_route_or_direction="W", differs_from_usual=True
+    )
+
+    text = _template_commute_phrase(recommendation)
+
+    assert "instead of your usual W" in text
+    assert "sooner" in text
+
+
+def test_commute_template_cites_reliability_when_it_differs_but_is_slower():
+    winner = _route(mode="mta", label="N", confidence=0.9, minutes_from_now=20)
+    usual = _route(mode="mta", label="W", confidence=0.4, minutes_from_now=15)
+    recommendation = CommuteRecommendation(
+        winner=winner, alternatives=[usual], usual_route_or_direction="W", differs_from_usual=True
+    )
+
+    text = _template_commute_phrase(recommendation)
+
+    assert "more reliable" in text
+
+
+def test_phrase_commute_recommendation_falls_back_to_template_when_no_api_key(monkeypatch):
+    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    winner = _route(mode="mta", label="N", minutes_from_now=5)
+    recommendation = CommuteRecommendation(
+        winner=winner, alternatives=[], usual_route_or_direction=None, differs_from_usual=False
+    )
+
+    text = phrase_commute_recommendation(recommendation)
+
+    assert "N" in text

@@ -25,10 +25,12 @@ Message content is now a real Schedule AI decision, not just "here's your
 usual route's number": on-time route -> phrased confirmation; a real,
 Behavior-AI-baseline-derived delay -> phrased with the actual delay
 minutes; no live data for the usual route at all -> Schedule AI delegates
-to decision_engine.rank_routes across every home/office candidate for a
-real substitute, which is what "Schedule AI hands off to the routing
-engine rather than re-implementing route-picking" concretely means today
-(see schedule_engine.py's module docstring).
+to commute_engine.rank_best (the PRD's "shared brain" - the same named
+ranking entry point Commute AI's own recommend_for_station calls, not a
+parallel copy of decision_engine.rank_routes) across every home/office
+candidate for a real substitute - this IS what "Schedule AI hands off to
+the routing engine rather than re-implementing route-picking" means (see
+schedule_engine.py's and commute_engine.py's module docstrings).
 """
 
 from datetime import datetime, timezone
@@ -36,7 +38,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..decision_engine import rank_routes
+from ..commute_engine import rank_best
 from ..llm_phrasing import phrase_schedule_notification
 from ..models import Trip, User
 from ..notify_service import PushSendException, send_push
@@ -88,7 +90,7 @@ async def send_notification_for_user(db: Session, user: User, now: datetime) -> 
 
     substitute = None
     if assessment.severity == DisruptionSeverity.NO_LIVE_DATA:
-        ranked = rank_routes(candidates, reliability_pref=user.reliability_pref, now=now)
+        ranked = rank_best(candidates, reliability_pref=user.reliability_pref, now=now)
         if not ranked:
             return False  # nothing usable to recommend instead - stay quiet rather than send an empty notification
         substitute = ranked[0]

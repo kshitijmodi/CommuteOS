@@ -1,18 +1,24 @@
 """Loads app/data/chat_station_index.csv (see
-backend/scripts/build_chat_station_index.py for how it's built) and
-resolves a free-text station name from a chat question into real
-(agency, code) matches - the one thing Chat AI's stateless tier needs
-that nothing else in the backend has, since every other feature either
-gets a station code directly from the client (recommendations) or from
-Trip history (home/office inference), never from unstructured text.
+backend/scripts/build_chat_station_index.py for how it's built). Two
+callers, two lookups:
 
-Deliberately simple matching (normalize + substring), not embeddings/
-fuzzy-distance search - station names are a small, fixed vocabulary
-(~5,900 rows) and a user asking about "hoboken" or "what's next from
-grove street" is well served by checking whether a station's name
-appears as a real word-boundary-respecting substring of the question;
-embedding search would add a real dependency and latency for no accuracy
-gain at this vocabulary size.
+- Chat AI's stateless tier (find_stations) resolves a free-text station
+  name from a chat question into real (agency, code) matches - the one
+  thing that feature needs that nothing else in the backend has, since
+  every other feature either gets a station code directly from the
+  client (recommendations) or from Trip history (home/office inference),
+  never from unstructured text.
+- Commute AI (station_for) looks up a station's own real candidate set
+  (routes/directions) given an (agency, code) it already knows - see
+  StationMatch.routes's docstring.
+
+find_stations's matching is deliberately simple (normalize + substring),
+not embeddings/fuzzy-distance search - station names are a small, fixed
+vocabulary (~5,900 rows) and a user asking about "hoboken" or "what's
+next from grove street" is well served by checking whether a station's
+name appears as a real word-boundary-respecting substring of the
+question; embedding search would add a real dependency and latency for
+no accuracy gain at this vocabulary size.
 """
 
 import csv
@@ -27,10 +33,14 @@ class StationMatch:
     name: str
     agency: str  # "mta" | "path" | "njt_rail" | "njt_bus" | "lirr"
     code: str
-    # MTA only - the route IDs serving this station (e.g. ["N", "W"]),
-    # needed because mta.get_arrivals requires one route_id per call, and
-    # nothing about a chat question specifies a route. Empty for every
-    # other agency (their get_arrivals only needs a station/stop code).
+    # MTA/PATH only - every real route_or_direction get_arrivals can be
+    # called with for this station (MTA: subway routes, e.g. ["N", "W"];
+    # PATH: its two fixed direction keys, ["ToNY", "ToNJ"]) - needed
+    # because both agencies require one route_or_direction per fetch call,
+    # unlike NJT rail/bus/LIRR where a station code alone is enough (empty
+    # list for those). Originally added for Chat AI (nothing about a chat
+    # question specifies a route); Commute AI (commute_engine.py) reads
+    # this as the station's full candidate set to rank.
     routes: list[str]
 
 
@@ -88,3 +98,16 @@ def _contains_whole(haystack: str, needle: str) -> bool:
     if not needle:
         return False
     return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
+
+
+def station_for(agency: str, code: str) -> StationMatch | None:
+    """Exact (agency, code) lookup - what Commute AI uses, since it's
+    called with a station the client already identified (opening that
+    station's arrivals screen), never resolving free text. None if the
+    agency/code pair isn't in the index (never a guess) - callers must
+    treat this the same as "no candidate set known for this station."
+    """
+    for station in _all_stations():
+        if station.agency == agency and station.code == code:
+            return station
+    return None

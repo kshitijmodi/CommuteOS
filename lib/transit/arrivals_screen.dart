@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../account/trip_logger.dart';
 import '../behavior/departure_detector.dart';
+import '../commute/commute_card.dart';
+import '../commute/commute_repository.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
 import '../lirr/lirr_service.dart';
@@ -40,8 +42,20 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     Agency.lirr => LirrService(),
   };
   final _tripLogger = TripLogger();
+  final _commuteRepository = CommuteRepository();
   Timer? _timer;
   bool _hasLoggedTrip = false;
+  bool _hasFetchedCommuteRecommendation = false;
+
+  /// Commute AI's real-time pick for this exact station, if the backend
+  /// has one - see commute_repository.dart. Null (not an error state)
+  /// covers every case where there's nothing to show: logged out, the
+  /// station isn't in the backend's index, or none of its real
+  /// candidates have live arrivals right now. Fetched once per screen
+  /// visit (see _fetchCommuteRecommendationOnce), not on every 30s poll -
+  /// a fresh recommendation every refresh would be needlessly chatty for
+  /// a card whose whole point is "here's the one thing worth flagging."
+  CommuteRecommendation? _commuteRecommendation;
 
   // The 30s background refresh polls flaky/best-effort feeds (PATH has no
   // documented SLA, NJT rail/bus proxy through a free-tier backend that can
@@ -73,6 +87,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
         .then((rawResult) {
           final result = dropPastArrivals(rawResult);
           _logTripOnce(result);
+          _fetchCommuteRecommendationOnce();
           if (!mounted) return;
 
           // A background refresh (we already have real data on screen)
@@ -138,6 +153,29 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
           if (tripId != null) {
             DepartureDetector.instance.registerOpenTrip(tripId);
           }
+        });
+  }
+
+  /// Fires Commute AI once per screen visit - see CommuteRecommendation's
+  /// docs on why this isn't refetched every 30s poll. Fire-and-forget,
+  /// same non-blocking posture as trip logging: a null result (logged
+  /// out, station not in the backend's index, or no live data for any
+  /// real candidate) just means no card shows, never an error the user
+  /// sees.
+  void _fetchCommuteRecommendationOnce() {
+    if (_hasFetchedCommuteRecommendation) return;
+    _hasFetchedCommuteRecommendation = true;
+
+    _commuteRepository
+        .getRecommendation(wireAgencyName(widget.station.agency), widget.station.id)
+        .then((recommendation) {
+          if (!mounted) return;
+          setState(() => _commuteRecommendation = recommendation);
+        })
+        .catchError((_) {
+          // Swallowed deliberately - same posture as trip logging. A
+          // failed Commute AI fetch shouldn't interrupt someone checking
+          // arrival times.
         });
   }
 
@@ -240,6 +278,19 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
       children: [
         if (!result.isLive) _staleBanner(context),
         if (result.isLive && _refreshFailed) _refreshFailedBanner(context),
+        if (_commuteRecommendation != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              0,
+            ),
+            child: CommuteCard(
+              agency: widget.station.agency,
+              recommendation: _commuteRecommendation!,
+            ),
+          ),
         Expanded(
           child: TabBarView(
             children: [

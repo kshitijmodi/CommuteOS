@@ -1,17 +1,24 @@
 """Builds app/data/chat_station_index.csv - a compact name -> (agency,
-code[, routes]) lookup used only by Chat AI's stateless tier
-(app/station_index.py) to resolve a free-text station name from a chat
-question into a real code the transit fetchers understand.
+code[, routes]) lookup. Originally built only for Chat AI's stateless
+tier (app/station_index.py, resolving a free-text station name into a
+real code the transit fetchers understand); now also the one place
+Commute AI (app/commute_engine.py) looks up a station's own real
+candidate set - MTA/PATH's `routes` column doubles as "every real
+route_or_direction get_arrivals can be called with for this station,"
+which for MTA is its subway routes (e.g. "N|W") and for PATH is its two
+fixed direction keys (always "ToNY|ToNJ" - see _path_rows). NJT rail/bus/
+LIRR leave this column empty since a station code alone is enough for
+those agencies' get_arrivals - there's no per-route/direction candidate
+set to enumerate.
 
 Deliberately NOT a copy of any agency's full station CSV (lat/lng, ADA
 info, branch lists, etc.) - those already live in the Flutter app's
 assets/data/*.csv (source of truth for browsing/search) and, where the
 backend also needs to re-fetch arrivals itself (LIRR), in
-backend/app/data/*.csv. This script re-derives only the columns Chat AI
-actually needs (name, agency, code, and - MTA/PATH only - the routes/
-directions a fetch call requires) from those same source files, rather
-than hand-maintaining a third copy of station data. Re-run this whenever
-an upstream station CSV changes.
+backend/app/data/*.csv. This script re-derives only the columns needed
+here from those same source files, rather than hand-maintaining a third
+copy of station data. Re-run this whenever an upstream station CSV
+changes.
 
 PATH has no CSV (see lib/path/path_station.dart's docstring - only 13
 stations, hardcoded) so its 13 rows are hardcoded here too, kept in sync
@@ -61,7 +68,12 @@ def _mta_rows() -> list[tuple[str, str, str, str]]:
 
 
 def _path_rows() -> list[tuple[str, str, str, str]]:
-    return [(name, "path", code, "") for code, name in _PATH_STATIONS]
+    # Every PATH station has the same two direction keys (see
+    # PathStation.directions in path_station.dart) - a station near one
+    # end of the system may only ever return live data for one of them at
+    # fetch time, but that's a live-data fact discovered by calling
+    # get_arrivals, not something to filter out of the candidate set here.
+    return [(name, "path", code, "ToNY|ToNJ") for code, name in _PATH_STATIONS]
 
 
 def _njt_rail_rows() -> list[tuple[str, str, str, str]]:

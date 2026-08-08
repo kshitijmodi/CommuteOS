@@ -495,19 +495,19 @@ Pleasant Plains,mta,S14,SIR
 Richmond Valley,mta,S13,SIR
 Tottenville,mta,S09,SIR
 Arthur Kill,mta,S11,SIR
-Newark,path,NWK,
-Harrison,path,HAR,
-Journal Square,path,JSQ,
-Grove Street,path,GRV,
-Exchange Place,path,EXP,
-Hoboken,path,HOB,
-Newport,path,NEW,
-World Trade Center,path,WTC,
-Christopher St,path,CHR,
-9 St,path,09S,
-14 St,path,14S,
-23 St,path,23S,
-33 St,path,33S,
+Newark,path,NWK,ToNY|ToNJ
+Harrison,path,HAR,ToNY|ToNJ
+Journal Square,path,JSQ,ToNY|ToNJ
+Grove Street,path,GRV,ToNY|ToNJ
+Exchange Place,path,EXP,ToNY|ToNJ
+Hoboken,path,HOB,ToNY|ToNJ
+Newport,path,NEW,ToNY|ToNJ
+World Trade Center,path,WTC,ToNY|ToNJ
+Christopher St,path,CHR,ToNY|ToNJ
+9 St,path,09S,ToNY|ToNJ
+14 St,path,14S,ToNY|ToNJ
+23 St,path,23S,ToNY|ToNJ
+33 St,path,33S,ToNY|ToNJ
 Aberdeen-Matawan,njt_rail,AM,
 Absecon,njt_rail,AB,
 Allendale,njt_rail,AZ,

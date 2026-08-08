@@ -1,4 +1,4 @@
-from app.station_index import find_stations, normalize
+from app.station_index import find_stations, normalize, station_for
 
 
 def test_normalize_strips_punctuation_and_lowercases():
@@ -59,12 +59,38 @@ def test_find_stations_ranks_shorter_names_first():
     assert matches[0].name == "Hoboken"
 
 
-def test_mta_station_carries_its_real_routes():
+def test_mta_and_path_stations_carry_their_real_route_or_direction_candidates():
     matches = find_stations("Journal Square")
     path_match = next(m for m in matches if m.agency == "path")
 
-    assert path_match.routes == []  # only MTA rows carry routes
+    # PATH rows carry its two fixed direction keys (see
+    # build_chat_station_index.py's _path_rows) - Commute AI reads this
+    # as the station's real candidate set, same as MTA's routes below.
+    assert path_match.routes == ["ToNY", "ToNJ"]
 
     mta_matches = [m for m in find_stations("Astoria Blvd") if m.agency == "mta"]
     assert mta_matches
     assert mta_matches[0].routes  # real MTA rows have at least one route
+
+
+def test_njt_rail_stations_carry_no_route_candidates():
+    # NJT rail/bus/LIRR need no route_or_direction to fetch arrivals (a
+    # station code alone returns every line) - unlike MTA/PATH, so these
+    # correctly carry an empty candidate list, not a guessed one.
+    matches = [m for m in find_stations("Newark Penn Station") if m.agency == "njt_rail"]
+
+    assert matches
+    assert matches[0].routes == []
+
+
+def test_station_for_exact_agency_and_code_lookup():
+    station = station_for("path", "JSQ")
+
+    assert station is not None
+    assert station.name == "Journal Square"
+    assert station.routes == ["ToNY", "ToNJ"]
+
+
+def test_station_for_returns_none_for_unknown_pair():
+    assert station_for("mta", "NOT_A_REAL_STOP_ID") is None
+    assert station_for("not_a_real_agency", "JSQ") is None
