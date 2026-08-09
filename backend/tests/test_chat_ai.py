@@ -88,6 +88,42 @@ async def test_no_match_question_asks_for_clarification():
     assert result.station is None
 
 
+# --- Real "not every message is a question" fix (2026-08-09) ---
+# Real bug found live: a plain "ok thanks" after an unresolved/ambiguous
+# turn fell through to the no-real-station-yet path and got answered as
+# if it were a genuine clarification-needed question ("Could you please
+# clarify which PATH station...") - a closing remark isn't a question at
+# all and never deserves that answer.
+
+
+@pytest.mark.asyncio
+async def test_plain_thanks_gets_a_friendly_reply_not_a_clarification_request():
+    result = await answer_question("ok thanks")
+
+    assert result.station is None
+    assert "clarify" not in result.text.lower()
+    assert "couldn't find" not in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_closing_remark_is_recognized_case_and_punctuation_insensitively():
+    from app.chat_ai import _is_conversation_closer
+
+    assert _is_conversation_closer("Thanks!")
+    assert _is_conversation_closer("  OK, thanks  ")
+    assert _is_conversation_closer("got it")
+
+
+@pytest.mark.asyncio
+async def test_a_real_question_containing_a_closer_word_is_not_swallowed():
+    from app.chat_ai import _is_conversation_closer
+
+    # Real regression guard: "cool" alone is a closer, but a real question
+    # that happens to start with it must still be treated as a question -
+    # this is why the check is exact-match, not substring.
+    assert not _is_conversation_closer("cool, what's next from Grove Street")
+
+
 @pytest.mark.asyncio
 async def test_arrivals_context_carries_real_headsigns_when_the_feed_reports_them(monkeypatch):
     # Real bug found live: PATH's feed reports a real per-arrival

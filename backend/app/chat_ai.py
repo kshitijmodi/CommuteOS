@@ -94,7 +94,12 @@ chat messages before the current question - use them only to understand \
 what a follow-up question is referring to (e.g. "what about the other \
 direction" means the direction opposite whatever station/direction was \
 just discussed). Never invent a fact that isn't in either the real \
-context given below or that real prior conversation.
+context given below or that real prior conversation. If a prior turn was \
+a refusal/clarification (no station was actually resolved), do NOT \
+summarize, repeat, or refer back to what was "previously asked" - just \
+answer the CURRENT question fresh using only the context given below; \
+narrating the conversation's own history back to the user is never the \
+correct answer.
 
 You will be given a JSON object with the user's question and a "context" \
 field. The context is one of:
@@ -110,7 +115,11 @@ together, describe them as they actually are grouped here; do not \
 assume there are exactly two directions or invent a distinction the data \
 doesn't show.
 - {"kind": "no_match"} - no known station matched the question. Ask the \
-user to clarify which station they mean; do not guess one.
+user to clarify which station they mean. Do NOT suggest, name, or list \
+ANY specific example station names (e.g. do not say "such as X or Y") - \
+you have no real list to draw examples from here, and naming any \
+station you were not given is inventing one. A plain, generic request \
+to clarify is the entire correct answer.
 - {"kind": "ambiguous", "options": [...]} - more than one station could \
 match, each with "name", "agency", and an optional "toward" (a real \
 direction hint, e.g. "Kearny" - two options can share the exact same \
@@ -278,6 +287,30 @@ def _ask_llm(
         return text.strip() if text else None
     except OpenAIError:
         return None
+
+
+_CLOSING_REMARKS = {
+    "ok", "okay", "ok thanks", "okay thanks", "thanks", "thank you",
+    "thanks!", "thank you!", "cool", "cool thanks", "great thanks",
+    "got it", "alright", "alright thanks", "k", "kk", "nice", "perfect",
+}
+
+
+def _is_conversation_closer(question: str) -> bool:
+    """Detects a plain acknowledgment/closing remark ("ok thanks", "got
+    it") - a real bug found live: these were falling through to
+    _last_mentioned_station's no-real-station-yet case and getting
+    answered as if they were a genuine clarification-needed question
+    ("Could you please clarify which PATH station...") - a real, if
+    minor, hallucination-adjacent bug, since "ok thanks" isn't a
+    question at all and doesn't deserve an answer that pretends it was
+    asking about a station. Deliberately an exact-match set, not a
+    substring check - these phrases are short/common enough that
+    substring-matching them inside a real question (e.g. "cool, what
+    about Grove Street") would wrongly swallow it.
+    """
+    normalized = re.sub(r"[^a-z ]", "", question.lower()).strip()
+    return normalized in _CLOSING_REMARKS
 
 
 def _is_out_of_scope(question: str) -> bool:
@@ -738,6 +771,16 @@ async def answer_question(
     history = (
         _load_recent_history(db, session_id) if db is not None and session_id else []
     )
+
+    if _is_conversation_closer(question):
+        # A plain "ok thanks"/"got it" isn't a question at all - never
+        # sent to the LLM (nothing to phrase, and a real bug found live:
+        # this used to fall through to the no-real-station-yet path and
+        # get answered as if it were a genuine clarification request).
+        # A fixed, friendly reply is correct every time, at zero cost.
+        answer = ChatAnswer(text="You're welcome! Let me know if you need anything else.", station=None)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
 
     if _is_nearest_question(question):
         answer = _answer_nearest_question(question, lat, lng, history)
