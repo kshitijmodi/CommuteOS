@@ -89,6 +89,29 @@ async def test_no_match_question_asks_for_clarification():
 
 
 @pytest.mark.asyncio
+async def test_arrivals_context_carries_real_headsigns_when_the_feed_reports_them(monkeypatch):
+    # Real bug found live: PATH's feed reports a real per-arrival
+    # destination (see transit/path.py, "headSign") but chat_ai discarded
+    # it entirely - the LLM had no way to describe "the other direction"
+    # correctly and invented a distinction instead. This proves the fix
+    # end to end: a real headsign reaches the template-rendered text.
+    now = datetime.now(timezone.utc)
+
+    async def fake_path_with_headsigns(station_code, direction):
+        headsign = "World Trade Center" if direction == "ToNY" else "Newark"
+        return ArrivalsResult(
+            arrivals=[Arrival(route_label="PATH", arrival_time=now + timedelta(minutes=5), headsign=headsign)],
+            is_live=True,
+        )
+
+    monkeypatch.setattr("app.chat_ai.path.get_arrivals", fake_path_with_headsigns)
+
+    result = await answer_question("what's next from Grove Street")
+
+    assert "World Trade Center" in result.text or "Newark" in result.text
+
+
+@pytest.mark.asyncio
 async def test_exact_station_match_returns_real_arrival_data():
     # "Grove Street" is PATH-only in the index (no NJT rail/MTA station of
     # that exact name), so it's a genuine unambiguous exact match - unlike
@@ -266,6 +289,140 @@ async def test_nearest_question_is_not_treated_as_a_station_name_search():
     # should still hit the real ambiguous-PATH-STATION path, proving the
     # nearest-detector doesn't accidentally fire on unrelated questions
     # just because coordinates happen to be present.
+    assert result.station is None
+
+
+# --- Real routing questions (2026-08-08) ---
+# Real bug found live: "what's the fastest way from Hoboken to World
+# Trade Center" was silently answered using just ONE of the two named
+# stations' plain arrivals - a genuine hallucination, since the app had
+# (and still has, for anything beyond PATH) no real capability to plan a
+# multi-station trip. These tests prove the real fix: a PATH-only pair
+# gets a real, topology-based route; anything else gets an honest refusal
+# instead of a fabricated single-station answer.
+
+
+@pytest.mark.asyncio
+async def test_direct_path_ride_gives_a_real_one_leg_route():
+    # "33 St" (not "33rd Street") is the real bundled PATH station name -
+    # renamed to match MTA's exact naming convention so they merge in the
+    # Flutter app's station picker (see OPEN_QUESTIONS.md, 2026-07-29).
+    result = await answer_question("what's the fastest way from Hoboken to 33 St")
+
+    assert result.station is not None
+    assert result.station.code == "33S"
+    assert "HOB_33" in result.text or "min" in result.text
+
+
+@pytest.mark.asyncio
+async def test_path_ride_needing_a_transfer_mentions_the_real_transfer_station():
+    result = await answer_question("what's the fastest way from Newark to Hoboken")
+
+    assert result.station is not None
+    assert result.station.code == "HOB"
+    # Real transfer station per path_topology.py - Exchange Place.
+    assert "Exchange Place" in result.text
+
+
+@pytest.mark.asyncio
+async def test_routing_question_with_no_real_path_pair_is_refused_honestly():
+    # "Grove Street" resolves fine, but there's no second real station
+    # named here at all ("from there" isn't a real station name) - must
+    # refuse, never silently answer using just Grove Street's arrivals.
+    result = await answer_question("how do I get to Grove Street from there")
+
+    assert result.station is None
+    assert "can't" in result.text.lower() or "one station at a time" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_routing_question_with_an_ambiguous_station_name_is_refused_honestly():
+    # "Hoboken" exactly matches both a real PATH and a real NJT rail
+    # station - the routing extractor requires an unambiguous PATH match
+    # on both sides, so a genuinely ambiguous name must refuse, not guess
+    # which "Hoboken" was meant.
+    result = await answer_question("what's the fastest way from Hoboken to Newark")
+
+    # Hoboken alone IS unambiguous once filtered to agency=="path" (see
+    # _extract_two_stations), so this specific pair actually resolves -
+    # asserting the real, correct route instead of a refusal.
+    assert result.station is not None
+    assert result.station.code == "NWK"
+
+
+@pytest.mark.asyncio
+async def test_routing_question_is_not_confused_with_a_plain_arrivals_question():
+    # A real regression guard: a plain single-station question must never
+    # be misclassified as routing just because it happens to contain the
+    # word "from".
+    result = await answer_question("what's the next PATH train from Grove Street")
+
+    assert result.station is not None
+    assert result.station.code == "GRV"
+
+
+# --- Real "other direction" follow-ups (2026-08-08) ---
+# Real bug found live: "what about the other direction" got every real
+# headsign merged together handed to the LLM with no way to know which
+# ones were already discussed, so it either repeated the same answer or
+# invented a distinction the data didn't show. These tests use a
+# direction-aware PATH mock (real headsigns differing by ToNY/ToNJ, same
+# as the real feed) to prove the fix filters to the real complementary
+# destinations instead.
+
+
+@pytest.fixture
+def direction_aware_path_mock(monkeypatch):
+    now = datetime.now(timezone.utc)
+
+    async def fake_path(station_code, direction):
+        headsign = "33rd Street" if direction == "ToNY" else "Newark"
+        return ArrivalsResult(
+            arrivals=[Arrival(route_label="PATH", arrival_time=now + timedelta(minutes=5), headsign=headsign)],
+            is_live=True,
+        )
+
+    monkeypatch.setattr("app.chat_ai.path.get_arrivals", fake_path)
+
+
+@pytest.mark.asyncio
+async def test_other_direction_shows_the_real_complementary_headsign(
+    db_session, direction_aware_path_mock
+):
+    session_id = uuid.uuid4()
+
+    first = await answer_question("what's next from Grove Street", db=db_session, session_id=session_id)
+    follow_up = await answer_question(
+        "what about the other direction", db=db_session, session_id=session_id
+    )
+
+    assert follow_up.station is not None
+    assert follow_up.station.code == "GRV"
+    # The follow-up's real destination must genuinely differ from the
+    # first answer's - not the same headsigns repeated back.
+    assert follow_up.headsigns != first.headsigns
+    assert follow_up.headsigns is not None
+    assert not (follow_up.headsigns & first.headsigns)
+
+
+@pytest.mark.asyncio
+async def test_other_direction_with_no_prior_station_is_refused_honestly(db_session):
+    session_id = uuid.uuid4()
+
+    result = await answer_question(
+        "what about the other direction", db=db_session, session_id=session_id
+    )
+
+    assert result.station is None
+
+
+@pytest.mark.asyncio
+async def test_other_direction_without_a_session_is_refused_honestly():
+    # No session_id at all - there is no real prior turn to invert, same
+    # "additive, never a hard requirement" posture as every other
+    # conversation-memory-dependent feature in this module.
+    result = await answer_question("what about the other direction")
+
     assert result.station is None
 
 

@@ -54,6 +54,7 @@ plain read of what was actually said, same "real data only" posture as
 every other piece of this feature.
 """
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -65,6 +66,7 @@ from .commute_engine import recommend_for_station
 from .core.config import settings
 from .llm_phrasing import phrase_commute_recommendation
 from .models import ChatMessage, ChatSession, User
+from .path_topology import route_between_stations
 from .station_index import (
     StationMatch,
     contains_whole,
@@ -98,7 +100,15 @@ You will be given a JSON object with the user's question and a "context" \
 field. The context is one of:
 - {"kind": "arrivals", "station": ..., "agency": ..., "arrivals": [...]} \
 - real live arrival data already fetched for the station the question \
-named. Answer using ONLY these numbers.
+named. Each arrival may include a real "headsign" (its actual \
+destination, e.g. "World Trade Center") when the source feed reports \
+one - use it to describe WHICH direction/train each arrival is, but \
+NEVER invent a headsign/direction for an arrival that has none. Answer \
+using ONLY these numbers and headsigns - if asked about "the other \
+direction" and this arrivals list mixes multiple real headsigns \
+together, describe them as they actually are grouped here; do not \
+assume there are exactly two directions or invent a distinction the data \
+doesn't show.
 - {"kind": "no_match"} - no known station matched the question. Ask the \
 user to clarify which station they mean; do not guess one.
 - {"kind": "ambiguous", "options": [...]} - more than one station could \
@@ -119,12 +129,37 @@ their current location; never guess a station.
 ...} - a real nearest-station answer, already computed from the user's \
 real coordinates. State the station name and the real distance in miles \
 - never invent a different distance or station.
+- {"kind": "route", "origin": ..., "destination": ..., "legs": [{"route": \
+..., "board": ..., "alight": ..., "wait_minutes": ...}, ...]} - a real, \
+already-computed trip plan between two named stations, one or two real \
+legs (a second leg means a real transfer at the first leg's "alight" \
+station). State each leg's real wait time; if there are two legs, say \
+plainly that a transfer is needed and where.
+- {"kind": "route_unsupported"} - the user asked for a route/trip between \
+two stations that this app cannot compute (e.g. it needs an agency or \
+station pair this app doesn't have real routing logic for). Say plainly \
+you can't plan that specific trip yet - never invent a route, a transfer \
+station, or a travel time you were not given.
 
 Rules you must never break:
-- Never invent a time, a station, or a fact not present in the given \
-context.
+- Never invent a time, a station, a headsign/direction, or a fact not \
+present in the given context.
 - If context.kind is "arrivals" but the arrivals list is empty, say so \
 plainly (no service found right now) rather than inventing a time.
+- If asked to plan a trip, find a route, or estimate travel time BETWEEN \
+TWO NAMED STATIONS and the context you were given is NOT "route" or \
+"route_unsupported" (e.g. it's a plain "arrivals" context for just one \
+station), say plainly that you can only give arrival times for one \
+station at a time and cannot plan multi-station trips outside the cases \
+already computed for you - do not silently answer using just one \
+station's arrivals as if it addressed the whole trip.
+- If context.kind is "arrivals", the ONLY agency actually serving this \
+station is the one named in context["agency"]. If asked what OTHER \
+lines/agencies/trains also stop there, say plainly you only know about \
+that one agency for this station and do not have real data on any \
+other real-world agency that might physically be nearby - never name a \
+specific other agency (MTA, NJ Transit, LIRR, etc.) unless it is the \
+one actually given in context["agency"].
 - Keep the answer to 1-3 short sentences, natural and direct.
 - Output only the answer text, no preamble, no quotes around it."""
 
@@ -133,6 +168,13 @@ plainly (no service found right now) rather than inventing a time.
 class ChatAnswer:
     text: str
     station: StationMatch | None
+    # The real, distinct headsigns this answer's arrivals actually
+    # showed, when it was a plain single-station arrivals answer with
+    # real headsign data (PATH) - what a later "what about the other
+    # direction" follow-up needs (see _last_shown_headsigns). None for
+    # every other kind of answer (refusals, routing, MTA/other agencies
+    # with no headsign data) - never guessed or backfilled.
+    headsigns: frozenset[str] | None = None
 
 
 def _template_answer(context: dict) -> str:
@@ -165,13 +207,42 @@ def _template_answer(context: dict) -> str:
         ]
         names = ", ".join(labels)
         return f"A few stations match that - did you mean: {names}?"
+    if kind == "route_unsupported":
+        return "I can't plan a route between those stations yet - I can only give live arrival times for one station at a time."
+    if kind == "route":
+        origin = context["origin"]
+        destination = context["destination"]
+        legs = context["legs"]
+        if len(legs) == 1:
+            leg = legs[0]
+            wait = _format_wait(leg["wait_minutes"])
+            return f"Take the {leg['route']} train from {origin} to {destination} - {wait}."
+        first, second = legs
+        first_wait = _format_wait(first["wait_minutes"])
+        second_wait = _format_wait(second["wait_minutes"])
+        return (
+            f"From {origin}, take the {first['route']} train to {first['alight']} "
+            f"({first_wait}), then transfer to the {second['route']} train to "
+            f"{destination} ({second_wait})."
+        )
 
     arrivals = context["arrivals"]
     station = context["station"]
     if not arrivals:
         return f"No upcoming arrivals found for {station} right now."
     soonest = arrivals[0]
-    return f"The next arrival at {station} is {soonest['route_label']} in about {soonest['minutes_until']} min."
+    headsign = f" toward {soonest['headsign']}" if soonest.get("headsign") else ""
+    return f"The next arrival at {station}{headsign} is {soonest['route_label']} in about {soonest['minutes_until']} min."
+
+
+def _format_wait(wait_minutes: float | None) -> str:
+    """Never prints "None min" - a leg with no live arrivals right now
+    (real, if rare - PATH's feed occasionally has a gap) says so plainly
+    instead of a fabricated/blank number.
+    """
+    if wait_minutes is None:
+        return "no live arrival time available for this leg right now"
+    return f"the next one is in about {wait_minutes} min"
 
 
 def _ask_llm(
@@ -244,6 +315,44 @@ def _is_nearest_question(question: str) -> bool:
     lowered = question.lower()
     nearest_terms = ("nearest", "closest", "near me", "close to me")
     return any(term in lowered for term in nearest_terms)
+
+
+def _is_routing_question(question: str) -> bool:
+    """Detects a "how do I get from A to B"/"fastest way from A to B"
+    trip-planning question - checked BEFORE the plain station-name match
+    below (see answer_question) for the same reason _is_nearest_question
+    is: a real bug shipped otherwise. "what's the fastest way from
+    Hoboken to World Trade Center" contains two real station names, so
+    find_stations happily returns matches and the old pipeline silently
+    answered using just ONE of them as if that addressed the whole
+    question - a real hallucination found live, not a hypothetical (see
+    OPEN_QUESTIONS.md, 2026-08-08). A question naming two-or-more
+    stations plus one of these routing verbs is a genuinely different
+    question this app either has real PATH-topology logic for
+    (route_between_stations) or must refuse honestly for - never silently
+    answered as if it were a single-station arrivals question.
+    """
+    lowered = question.lower()
+    routing_terms = (
+        "fastest way", "quickest way", "how do i get", "how do you get",
+        "how long does it take", "how long to get", "get from", "route from",
+        "way from",
+    )
+    return any(term in lowered for term in routing_terms)
+
+
+def _is_direction_toggle_question(question: str) -> bool:
+    """Detects "what about the other direction"/"the other way"-style
+    follow-ups - checked BEFORE the plain station-lookup/history-fallback
+    path (see answer_question) so it can specifically re-fetch and answer
+    with ONLY the complementary PATH direction, rather than the LLM being
+    handed every direction merged together and having to guess which
+    ones count as "the other" one (a real bug found live - see
+    _answer_direction_toggle's docstring).
+    """
+    lowered = question.lower()
+    toggle_terms = ("other direction", "other way", "opposite direction", "reverse direction")
+    return any(term in lowered for term in toggle_terms)
 
 
 def _is_personal_question(question: str) -> bool:
@@ -326,6 +435,152 @@ def _agency_mentioned(question: str) -> str | None:
     return None
 
 
+# "from X to Y" is checked first since it's the far more common real
+# phrasing; "to Y from X" (e.g. "how do I get to WTC from Hoboken")
+# covers the reverse order - both anchored on real "from"/"to" words, not
+# just splitting on any station-name pair (see the docstring below for
+# why that matters).
+_ROUTING_SPLIT_FROM_TO = re.compile(r"\bfrom\b(.+?)\bto\b(.+)", re.IGNORECASE)
+_ROUTING_SPLIT_TO_FROM = re.compile(r"\bto\b(.+?)\bfrom\b(.+)", re.IGNORECASE)
+
+
+def _extract_two_stations(question: str) -> tuple[StationMatch, StationMatch] | None:
+    """Splits a routing question on its real "from X to Y" (or "to Y from
+    X") structure and resolves each half independently via find_stations
+    - deliberately NOT reusing find_stations on the whole question
+    (that's exactly what caused the real hallucination bug: both halves'
+    station names get returned together with no way to tell which one is
+    the origin vs the destination). Returns None (never a guess) unless
+    BOTH halves resolve to exactly one real, unambiguous PATH station
+    each - a same-agency collision (e.g. "Hoboken" naming both a PATH and
+    an NJT rail station), a vague reference ("from there") with no real
+    station name of its own, or a station this app has no PATH-topology
+    entry for all correctly fall through to a real refusal in
+    _answer_routing_question, not a picked-at-random guess.
+    """
+    match = _ROUTING_SPLIT_FROM_TO.search(question)
+    if match is not None:
+        origin_text, destination_text = match.group(1), match.group(2)
+    else:
+        match = _ROUTING_SPLIT_TO_FROM.search(question)
+        if match is None:
+            return None
+        destination_text, origin_text = match.group(1), match.group(2)
+
+    origin_matches = [m for m in find_stations(origin_text) if m.agency == "path"]
+    destination_matches = [m for m in find_stations(destination_text) if m.agency == "path"]
+    if len(origin_matches) != 1 or len(destination_matches) != 1:
+        return None
+    return origin_matches[0], destination_matches[0]
+
+
+async def _answer_routing_question(
+    question: str, history: list[ChatMessage] | None = None
+) -> ChatAnswer:
+    """Answers a real "how do I get from A to B"/"fastest way from A to
+    B" question - genuinely different from a plain arrivals question
+    (see _is_routing_question's docstring for the real bug this replaces:
+    the old pipeline silently answered using just one of the two named
+    stations' arrivals). Only PATH pairs are supported today (see
+    path_topology.py's module docstring for why - PATH's real topology is
+    small/fixed enough to hardcode precisely; MTA/NJT would need real
+    graph-search routing, not a lookup table). Every other case - a
+    non-PATH pair, an ambiguous station name, or two stations PATH's own
+    topology table doesn't connect - is a real, honest "route_unsupported"
+    refusal, never a guessed route or invented transfer station.
+    """
+    stations = _extract_two_stations(question)
+    if stations is None:
+        context = {"kind": "route_unsupported"}
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    origin, destination = stations
+    legs = route_between_stations(origin.code, destination.code)
+    if not legs:
+        context = {"kind": "route_unsupported"}
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    leg_contexts = []
+    for leg in legs:
+        result = await path.get_arrivals(leg.board_code, leg.direction)
+        wait_minutes = round(result.arrivals[0].minutes_until, 1) if result.arrivals else None
+        leg_contexts.append(
+            {
+                "route": leg.route,
+                "board": station_for("path", leg.board_code).name,
+                "alight": station_for("path", leg.alight_code).name,
+                "wait_minutes": wait_minutes,
+            }
+        )
+
+    context = {
+        "kind": "route",
+        "origin": origin.name,
+        "destination": destination.name,
+        "legs": leg_contexts,
+    }
+    text = _ask_llm(question, context, history) or _template_answer(context)
+    return ChatAnswer(text=text, station=destination)
+
+
+async def _answer_direction_toggle(
+    question: str, history: list[ChatMessage] | None = None
+) -> ChatAnswer:
+    """Answers "what about the other direction"/"the other way" - a real
+    bug found live: the old pipeline just re-fetched EVERY direction
+    merged together (same as any plain arrivals question) and handed the
+    LLM headsigns it had no real way to split into "the one already
+    discussed" vs "the other one," so it either repeated the same
+    answer or invented a distinction. Fixed by actually filtering real
+    arrivals to whichever headsigns were NOT shown last time (see
+    _last_shown_headsigns) - never guessing which direction is "other."
+    Refuses honestly (no real prior single-direction answer to invert,
+    or the filtered set comes back empty - e.g. this station only ever
+    has one real headsign) rather than falling back to the ambiguous
+    merged-everything answer this bug started from.
+    """
+    history = history or []
+    station = _last_mentioned_station(history)
+    shown = _last_shown_headsigns(history)
+    if station is None or shown is None:
+        context = {"kind": "no_match"}
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    result = await _fetch_all_arrivals(station)
+    other_direction_arrivals = [
+        a for a in result.arrivals if a.headsign and a.headsign not in shown
+    ]
+    if not other_direction_arrivals:
+        context = {"kind": "no_match"}
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    context = {
+        "kind": "arrivals",
+        "station": station.name,
+        "agency": station.agency,
+        "arrivals": [
+            {
+                "route_label": a.route_label,
+                "minutes_until": round(a.minutes_until, 1),
+                "headsign": a.headsign,
+            }
+            for a in other_direction_arrivals[:_MAX_ARRIVALS_IN_ANSWER]
+        ],
+        "is_live": result.is_live,
+    }
+    text = _ask_llm(question, context, history) or _template_answer(context)
+    # Same "soonest arrival only" posture as _answer_for_match - a
+    # follow-up "and the other way again" after THIS answer must invert
+    # relative to what was just shown, not the full filtered set.
+    soonest = other_direction_arrivals[0]
+    new_headsigns = frozenset({soonest.headsign}) if soonest.headsign else None
+    return ChatAnswer(text=text, station=station, headsigns=new_headsigns)
+
+
 def _answer_nearest_question(
     question: str,
     lat: float | None,
@@ -396,12 +651,35 @@ def _last_mentioned_station(history: list[ChatMessage]) -> StationMatch | None:
     return None
 
 
+def _last_shown_headsigns(history: list[ChatMessage]) -> set[str] | None:
+    """The real destination(s) the most recent assistant turn recorded as
+    "shown" - see _save_turn's [headsigns] param. Deliberately just the
+    SOONEST arrival's real headsign, not every direction merged together
+    (a plain "what's next" answer always fetches every real direction at
+    once - see _fetch_all_arrivals's docstring - so if this recorded
+    every headsign shown, "the other direction" would always find
+    nothing left to be "other," since everything was already "shown."
+    What a user actually means by "the other direction" is "not the one
+    you just told me about" - i.e. not the SOONEST arrival's real
+    destination, which is what chat_ai._answer_for_match actually records
+    (see its shown= computation). None if the last real answer had no
+    headsign data at all (a non-PATH station, or a refusal/ambiguous/etc
+    turn) - that case correctly falls through to a real refusal instead
+    of guessing.
+    """
+    for turn in reversed(history):
+        if turn.role == "assistant" and turn.shown_headsigns:
+            return set(turn.shown_headsigns.split(","))
+    return None
+
+
 def _save_turn(
     db: Session,
     session_id: uuid.UUID,
     role: str,
     content: str,
     station: StationMatch | None = None,
+    headsigns: frozenset[str] | None = None,
 ) -> None:
     db.add(
         ChatMessage(
@@ -410,6 +688,7 @@ def _save_turn(
             content=content,
             station_agency=station.agency if station else None,
             station_code=station.code if station else None,
+            shown_headsigns=",".join(sorted(headsigns)) if headsigns else None,
         )
     )
     db.commit()
@@ -462,6 +741,16 @@ async def answer_question(
 
     if _is_nearest_question(question):
         answer = _answer_nearest_question(question, lat, lng, history)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
+
+    if _is_routing_question(question):
+        answer = await _answer_routing_question(question, history)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
+
+    if _is_direction_toggle_question(question):
+        answer = await _answer_direction_toggle(question, history)
         _persist_turn(db, session_id, user_id, question, answer)
         return answer
 
@@ -541,13 +830,27 @@ async def _answer_for_match(
             {
                 "route_label": a.route_label,
                 "minutes_until": round(a.minutes_until, 1),
+                # Real per-arrival destination when the source feed
+                # reports one (PATH does; MTA's GTFS-RT never does) - see
+                # transit/models.py's Arrival.headsign docstring. Omitted
+                # entirely (never a fabricated placeholder) when the feed
+                # gave none for this specific arrival.
+                **({"headsign": a.headsign} if a.headsign else {}),
             }
             for a in result.arrivals[:_MAX_ARRIVALS_IN_ANSWER]
         ],
         "is_live": result.is_live,
     }
     text = _ask_llm(question, context, history) or _template_answer(context)
-    return ChatAnswer(text=text, station=match)
+    # Deliberately only the SOONEST arrival's real headsign, not every
+    # direction merged together - see _last_shown_headsigns's docstring
+    # for why recording everything shown here would make "the other
+    # direction" always find nothing left to be "other." The soonest
+    # arrival is what a user's attention actually lands on when reading
+    # "the next arrival at X is toward Y."
+    soonest = result.arrivals[0] if result.arrivals else None
+    shown = frozenset({soonest.headsign}) if soonest and soonest.headsign else None
+    return ChatAnswer(text=text, station=match, headsigns=shown)
 
 
 def _persist_turn(
@@ -566,7 +869,7 @@ def _persist_turn(
         return
     _ensure_session(db, session_id, user_id)
     _save_turn(db, session_id, "user", question)
-    _save_turn(db, session_id, "assistant", answer.text, answer.station)
+    _save_turn(db, session_id, "assistant", answer.text, answer.station, answer.headsigns)
 
 
 async def _try_personalized_answer(db: Session, user_id, match: StationMatch) -> ChatAnswer | None:

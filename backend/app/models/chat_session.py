@@ -78,6 +78,15 @@ class ChatMessage(Base):
     # never a guess synthesized from the message text itself.
     station_agency: Mapped[str | None] = mapped_column(String, nullable=True)
     station_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The real, distinct headsigns (destinations) this assistant turn's
+    # arrivals actually showed, comma-joined - e.g. "33rd Street,World
+    # Trade Center" (see chat_ai.py's _answer_direction_toggle, added
+    # 2026-08-08 after "what about the other direction" was found
+    # hallucinating an answer, since nothing tracked which real
+    # destinations were actually shown last). Null for a user turn, an
+    # answer with no headsign data at all (MTA/other agencies never
+    # report one), or any non-arrivals answer - never guessed.
+    shown_headsigns: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

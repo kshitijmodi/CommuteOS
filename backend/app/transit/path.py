@@ -59,10 +59,20 @@ async def get_arrivals(station_code: str, direction: str) -> ArrivalsResult:
             last_updated = last_updated.replace(tzinfo=timezone.utc)
         newest_update = max(newest_update, last_updated)
 
+        # The feed's own "headSign" (e.g. "World Trade Center", "33rd
+        # Street") - real per-arrival destination text, confirmed present
+        # in the live feed but discarded here until 2026-08-08 (see
+        # transit/models.py's Arrival.headsign docstring). Falls back to
+        # the bare "target" station code (e.g. "WTC") on the rare message
+        # missing headSign, rather than leaving it blank - still real feed
+        # data, just less human-readable.
+        headsign = message.get("headSign") or message.get("target")
+
         arrivals.append(
             Arrival(
                 route_label="PATH",
                 arrival_time=now + timedelta(seconds=seconds_to_arrival),
+                headsign=headsign,
             )
         )
 
