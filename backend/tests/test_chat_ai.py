@@ -345,6 +345,19 @@ async def test_same_name_different_agency_also_stays_ambiguous():
 
 
 @pytest.mark.asyncio
+async def test_a_question_naming_its_own_agency_resolves_without_asking_again():
+    # Real bug found live, 2026-08-10: "the next PATH train from
+    # Hoboken" already names which real agency is meant (PATH, not NJT
+    # rail) - asking the user to pick again discards information the
+    # question itself already gave.
+    result = await answer_question("when's the next PATH train from Hoboken")
+
+    assert result.station is not None
+    assert result.station.agency == "path"
+    assert result.station.code == "HOB"
+
+
+@pytest.mark.asyncio
 async def test_a_bare_agency_reply_resolves_the_immediately_prior_ambiguous_question(
     db_session,
 ):

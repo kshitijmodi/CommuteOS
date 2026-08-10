@@ -108,9 +108,15 @@ field. The context is one of:
 named. Each arrival may include a real "headsign" (its actual \
 destination, e.g. "World Trade Center") when the source feed reports \
 one - use it to describe WHICH direction/train each arrival is, but \
-NEVER invent a headsign/direction for an arrival that has none. Answer \
-using ONLY these numbers and headsigns - if asked about "the other \
-direction" and this arrivals list mixes multiple real headsigns \
+NEVER invent a headsign/direction for an arrival that has none, and \
+NEVER substitute a different place name than the exact "headsign" \
+string given - every destination you state must be copy-identical to \
+one of the real "headsign" values actually present in "arrivals," never \
+a different real place that merely sounds plausible for this line or \
+agency (e.g. do not say "Newark" if no arrival's headsign is literally \
+"Newark," even if Newark is a real stop on this line in general). \
+Answer using ONLY these numbers and headsigns - if asked about "the \
+other direction" and this arrivals list mixes multiple real headsigns \
 together, describe them as they actually are grouped here; do not \
 assume there are exactly two directions or invent a distinction the data \
 doesn't show.
@@ -1132,6 +1138,16 @@ async def answer_question(
         return answer
 
     if not _is_unambiguous(question, matches):
+        agency_resolved = _resolve_by_agency_hint(question, matches)
+        if agency_resolved is not None:
+            # A real bug found live, 2026-08-10: "the next PATH train
+            # from Hoboken" already names which real agency is meant -
+            # asking the user to pick again between PATH and NJ Transit
+            # ignores information the question itself already gave.
+            answer = await _answer_for_match(question, agency_resolved, db, user_id, history)
+            _persist_turn(db, session_id, user_id, question, answer)
+            return answer
+
         context = {
             "kind": "ambiguous",
             "options": [
@@ -1291,3 +1307,32 @@ def _is_unambiguous(question: str, matches: list[StationMatch]) -> bool:
         if m is not top and contains_whole(normalized_question, normalize(m.name))
     }
     return not other_real_names
+
+
+def _resolve_by_agency_hint(
+    question: str, matches: list[StationMatch]
+) -> StationMatch | None:
+    """When a station name collides across agencies (e.g. "Hoboken"
+    names both a real PATH station and a real NJT rail station) but the
+    question itself already names one real agency - "the next PATH
+    train from Hoboken" - resolve to that one rather than asking the
+    user to pick again. A real bug found live, 2026-08-10: the question
+    already gave this information and it was being discarded, asking a
+    redundant clarifying question. Only ever resolves when the agency
+    hint narrows the real candidates down to EXACTLY one - if the hint
+    matches zero or more than one of the actual colliding matches
+    (should not happen given how _AGENCY_TERMS is built, but never
+    assumed), this returns None and the normal ambiguous refusal still
+    applies rather than guessing.
+    """
+    agency = _agency_mentioned(question)
+    if agency is None:
+        return None
+    same_named = [
+        m for m in matches if normalize(m.name) == normalize(matches[0].name)
+    ]
+    candidates = same_named if len(same_named) > 1 else matches
+    agency_matches = [m for m in candidates if m.agency == agency]
+    if len(agency_matches) == 1:
+        return agency_matches[0]
+    return None
