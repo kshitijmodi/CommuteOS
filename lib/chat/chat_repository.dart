@@ -51,6 +51,19 @@ class ChatException implements Exception {
 /// ChatSessionStore) so a follow-up question ("what about the other
 /// direction") can be resolved against what was actually asked and
 /// answered before it, server-side.
+///
+/// Real location on every question (broadened 2026-08-09): previously
+/// only asked for GPS when the question itself contained "nearest"-style
+/// wording - a real user expectation found live: a station-less question
+/// with no prior conversation context should still be answerable from
+/// wherever the user actually is, not just ones that happen to say
+/// "nearest." Real coordinates are now attached to every call once
+/// location permission is available (the backend only ever uses them as
+/// a fallback tier - never overriding a station the question or
+/// conversation history already named, see answer_question's docstring).
+/// The first-ever chat question triggers Android's real permission
+/// prompt if not already granted/denied; every call after that is fast
+/// (no re-prompt) regardless of the user's choice.
 class ChatRepository {
   ChatRepository({
     AuthRepository? authRepository,
@@ -67,15 +80,6 @@ class ChatRepository {
   final LocationService _locationService;
   final ChatSessionStore _sessionStore;
 
-  // Mirrors the backend's own _is_nearest_question (see
-  // backend/app/chat_ai.py) - kept in sync deliberately, since asking for
-  // location permission is itself a user-facing moment that should only
-  // ever happen for a question that actually needs it, not every question.
-  static final _nearestPattern = RegExp(
-    r'nearest|closest|near me|close to me',
-    caseSensitive: false,
-  );
-
   Future<ChatAnswer> ask(String question) async {
     final token = await _authRepository.getToken();
     final headers = {
@@ -83,13 +87,9 @@ class ChatRepository {
       if (token != null) 'Authorization': 'Bearer $token',
     };
 
-    double? lat;
-    double? lng;
-    if (_nearestPattern.hasMatch(question)) {
-      final location = await _locationService.getCurrentLocation();
-      lat = location.latitude;
-      lng = location.longitude;
-    }
+    final location = await _locationService.getCurrentLocation();
+    final lat = location.latitude;
+    final lng = location.longitude;
 
     final sessionId = await _sessionStore.getSessionId();
 

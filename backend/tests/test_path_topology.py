@@ -1,4 +1,4 @@
-from app.path_topology import PathLeg, route_between_stations
+from app.path_topology import AdjacentStation, PathLeg, adjacent_stations, route_between_stations
 
 
 def test_same_station_returns_empty_list():
@@ -53,6 +53,32 @@ def test_journal_square_and_grove_street_are_a_direct_ride():
     assert len(legs) == 1
     assert legs[0].board_code == "JSQ"
     assert legs[0].alight_code == "GRV"
+
+
+class TestAdjacentStations:
+    def test_grove_street_has_real_adjacent_stations_on_two_routes(self):
+        # Real fact confirmed via research: Grove Street sits on both
+        # NWK_WTC (Exchange Place toward NY, Journal Square toward NJ)
+        # and JSQ_33 (Christopher St toward NY, Journal Square toward NJ).
+        results = adjacent_stations("GRV")
+
+        by_route_direction = {(a.route, a.direction): a.station_code for a in results}
+        assert by_route_direction[("NWK_WTC", "ToNY")] == "EXP"
+        assert by_route_direction[("NWK_WTC", "ToNJ")] == "JSQ"
+        assert by_route_direction[("JSQ_33", "ToNY")] == "CHR"
+        assert by_route_direction[("JSQ_33", "ToNJ")] == "JSQ"
+
+    def test_a_terminus_has_no_adjacent_station_in_the_direction_past_it(self):
+        # Newark is the real western terminus of NWK_WTC - nothing comes
+        # "before" it in the ToNJ direction.
+        results = adjacent_stations("NWK")
+
+        directions = {a.direction for a in results}
+        assert "ToNJ" not in directions
+        assert "ToNY" in directions
+
+    def test_unknown_station_code_returns_no_guessed_adjacency(self):
+        assert adjacent_stations("NOT_A_REAL_PATH_CODE") == []
 
 
 class TestPathLegDirection:

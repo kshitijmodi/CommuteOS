@@ -88,6 +88,115 @@ async def test_no_match_question_asks_for_clarification():
     assert result.station is None
 
 
+# --- Real GPS fallback for station-less questions (2026-08-09) ---
+# Real user expectation found live: a station-less question with no
+# resolvable prior conversation context should still be answerable from
+# the user's real current location, not just questions that happen to say
+# "nearest." Real coordinates are now a fallback tier, used only when
+# neither the question nor the conversation history names a real station.
+
+
+@pytest.mark.asyncio
+async def test_station_less_question_falls_back_to_the_real_nearest_station():
+    # Real coordinates right at Journal Square PATH's own location -
+    # same fixture data test_station_index.py's nearest_stations tests use.
+    result = await answer_question(
+        "what's next", lat=40.7318097, lng=-74.0628655
+    )
+
+    assert result.station is not None
+    assert result.station.code == "JSQ"
+
+
+@pytest.mark.asyncio
+async def test_station_less_question_without_coordinates_still_asks_for_clarification():
+    # No lat/lng at all (no permission, or an old client) - must fall
+    # through to the existing honest refusal, never guess a station.
+    result = await answer_question("what's next")
+
+    assert result.station is None
+    assert "couldn't find a station" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_a_real_named_station_is_never_overridden_by_gps_fallback():
+    # Real regression guard: coordinates being present must never hijack
+    # a question that already names its own real station - GPS is a
+    # fallback tier, not a default.
+    result = await answer_question(
+        "what's next from Grove Street", lat=40.7318097, lng=-74.0628655
+    )
+
+    assert result.station is not None
+    assert result.station.code == "GRV"
+
+
+@pytest.mark.asyncio
+async def test_conversation_history_is_preferred_over_gps_fallback(db_session):
+    # Real regression guard: a real station already established in THIS
+    # conversation must win over falling back to GPS - the conversation's
+    # own context is more specific than "wherever the user happens to be
+    # standing right now."
+    session_id = uuid.uuid4()
+    await answer_question("what's next from Grove Street", db=db_session, session_id=session_id)
+
+    follow_up = await answer_question(
+        "what time is the next one",
+        db=db_session,
+        session_id=session_id,
+        lat=40.7318097,
+        lng=-74.0628655,
+    )
+
+    assert follow_up.station is not None
+    assert follow_up.station.code == "GRV"
+
+
+# --- Real implicit-origin routing (2026-08-09) ---
+# Real bug found live: "best way to reach Newport mall now" names only
+# ONE station - the real origin is wherever the user currently is, not a
+# second named station - and used to fall straight through to a plain
+# arrivals answer for that one station, silently ignoring the actual
+# routing intent (and the real GPS coordinates the app already had).
+
+
+@pytest.mark.asyncio
+async def test_reach_x_with_real_gps_routes_from_the_real_nearest_station():
+    # Real coordinates at Journal Square's own location - the real
+    # nearest PATH station should become the implicit origin, routed to
+    # Newport via the real transfer at Exchange Place.
+    result = await answer_question(
+        "What is the best way to reach Newport mall now?",
+        lat=40.7318097,
+        lng=-74.0628655,
+    )
+
+    assert result.station is not None
+    assert result.station.code == "NEW"
+    assert "Exchange Place" in result.text
+
+
+@pytest.mark.asyncio
+async def test_reach_x_without_coordinates_refuses_honestly():
+    # No real GPS at all - there's no real origin to route from, so this
+    # must refuse ("route_unsupported") rather than silently answering
+    # with just Newport's own plain arrivals, which would address only
+    # half the real routing question being asked.
+    result = await answer_question("What is the best way to reach Newport mall now?")
+
+    assert result.station is None
+    assert "can't" in result.text.lower() or "one station at a time" in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_reach_x_is_not_triggered_for_an_ambiguous_or_unnamed_destination():
+    result = await answer_question(
+        "how do I get to nowhere real123", lat=40.7318097, lng=-74.0628655
+    )
+
+    assert result.station is None
+
+
 # --- Real "not every message is a question" fix (2026-08-09) ---
 # Real bug found live: a plain "ok thanks" after an unresolved/ambiguous
 # turn fell through to the no-real-station-yet path and got answered as
@@ -395,6 +504,80 @@ async def test_routing_question_is_not_confused_with_a_plain_arrivals_question()
 
     assert result.station is not None
     assert result.station.code == "GRV"
+
+
+@pytest.mark.asyncio
+async def test_next_train_to_x_from_y_phrasing_is_recognized_as_routing():
+    # Real bug found live, 2026-08-09: "next train TO Newport FROM
+    # Journal Square" wasn't recognized as routing at all (the fixed
+    # verb list only covered "fastest way"/"how do I get" style
+    # phrasing), so it silently answered with Newport's own arrivals,
+    # discarding the real "from Journal Square" half of the question
+    # entirely and answering trains FROM Newport instead of TO it.
+    result = await answer_question(
+        "What is the next train to newport from journal square path?"
+    )
+
+    assert result.station is not None
+    assert result.station.code == "NEW"
+    assert "Journal Square" in result.text
+    assert "transfer" in result.text.lower() or "Exchange Place" in result.text
+
+
+@pytest.mark.asyncio
+async def test_a_question_naming_two_real_different_stations_never_silently_picks_one():
+    # Real bug found live, 2026-08-09: _is_unambiguous only ever checked
+    # for SAME-name collisions - a question naming two real, DIFFERENT
+    # stations (with no routing verb _is_routing_question recognizes)
+    # sailed through as "unambiguous" and silently answered with
+    # whichever one find_stations ranked first, discarding the other
+    # real station entirely. This phrasing has no routing verb and no
+    # from/to structure, so it must not silently pick one - it should at
+    # minimum ask for clarification rather than answer only one.
+    result = await answer_question("Grove Street and Journal Square trains")
+
+    # Either genuinely refuses (no single station chosen) or - if some
+    # future intent classifier legitimately handles this phrasing - it
+    # must not be the OLD bug's exact failure mode of silently returning
+    # just one of the two stations with no acknowledgment of the other.
+    if result.station is not None:
+        assert "Journal Square" in result.text and "Grove Street" in result.text
+
+
+# --- Real "next station after X" topology questions (2026-08-09) ---
+# Real bug found live: "what's the next station after Grove Street" - a
+# genuinely different question type (real line topology, not arrival
+# times, not A-to-B routing) - had no handler at all and fell through to
+# a plain arrivals answer that had nothing to do with the real question.
+
+
+@pytest.mark.asyncio
+async def test_next_station_question_gives_real_adjacent_stations():
+    result = await answer_question("what is next station after grove street")
+
+    assert result.station is not None
+    assert result.station.code == "GRV"
+    # Real adjacency per path_topology.py - Exchange Place (toward NY)
+    # and Journal Square (toward NJ) are genuinely next to Grove Street.
+    assert "Exchange Place" in result.text
+    assert "Journal Square" in result.text
+
+
+@pytest.mark.asyncio
+async def test_next_station_question_is_not_confused_with_a_plain_arrivals_question():
+    result = await answer_question("what's next from Grove Street")
+
+    # Must still be a plain arrivals answer, not a next-station answer -
+    # "from" alone shouldn't trigger the next-station classifier.
+    assert result.station is not None
+    assert result.station.code == "GRV"
+
+
+@pytest.mark.asyncio
+async def test_next_station_question_for_a_non_path_station_refuses_honestly():
+    result = await answer_question("what is the next station after Astoria-Ditmars Blvd")
+
+    assert result.station is None
 
 
 # --- Real "other direction" follow-ups (2026-08-08) ---

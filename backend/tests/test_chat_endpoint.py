@@ -116,6 +116,25 @@ def test_chat_refuses_nearest_question_without_coordinates(client):
     assert "location" in body["answer"].lower()
 
 
+def test_chat_falls_back_to_the_real_nearest_station_for_a_station_less_question(client):
+    # Real user expectation, added 2026-08-09: a plain station-less
+    # question with real coordinates attached should still resolve to
+    # the real nearest station, not just questions worded with "nearest."
+    response = client.post(
+        "/chat",
+        json={
+            "question": "what's next",
+            "lat": 40.7318097,
+            "lng": -74.0628655,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["station_name"] == "Journal Square"
+    assert body["agency"] == "path"
+
+
 def test_chat_remembers_the_station_across_a_real_session(client):
     # End-to-end proof (through the real HTTP endpoint, not just
     # answer_question directly) that a station-less follow-up resolves

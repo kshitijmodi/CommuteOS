@@ -81,6 +81,44 @@ def _routes_for_station(code: str) -> list[str]:
     return [route for route, stations in _ROUTES.items() if code in stations]
 
 
+@dataclass(frozen=True)
+class AdjacentStation:
+    """One real next-stop relationship - "on [route], the next real stop
+    heading [direction] from the station this was asked about is
+    [station_code]." A station on 2+ routes (e.g. Journal Square, on
+    both NWK_WTC and JSQ_33) genuinely has more than one real "next
+    station" in a given direction - each one is a real, different
+    physical stop, never collapsed into one guessed answer.
+    """
+
+    route: str
+    direction: str  # "ToNY" | "ToNJ"
+    station_code: str
+
+
+def adjacent_stations(station_code: str) -> list[AdjacentStation]:
+    """Every real next-stop relationship for [station_code], across
+    every route it's actually on - added 2026-08-09 after a real user
+    question ("what's the next station after Grove Street") that this
+    app had no concept of at all: not an arrival-time question (no live
+    data involved) and not an A-to-B routing question (no destination
+    named) - a third, genuinely different question type, "what's
+    adjacent to this station on the real line." Empty list (never a
+    guess) if [station_code] isn't a real station in this table, or is
+    the last stop on every route it's on with nothing further in that
+    direction.
+    """
+    results = []
+    for route in _routes_for_station(station_code):
+        stops = _ROUTES[route]
+        index = stops.index(station_code)
+        if index + 1 < len(stops):
+            results.append(AdjacentStation(route=route, direction="ToNY", station_code=stops[index + 1]))
+        if index - 1 >= 0:
+            results.append(AdjacentStation(route=route, direction="ToNJ", station_code=stops[index - 1]))
+    return results
+
+
 def route_between_stations(origin_code: str, destination_code: str) -> list[PathLeg] | None:
     """Real PATH topology only - no live data, no schedule awareness (see
     module docstring). Returns:

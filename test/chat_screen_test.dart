@@ -6,10 +6,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:commuteos/chat/chat_repository.dart';
 import 'package:commuteos/chat/chat_screen.dart';
+import 'package:commuteos/chat/location_service.dart';
 import 'package:commuteos/design/theme.dart';
 
 Widget _wrap(Widget child) {
   return MaterialApp(theme: buildAppTheme(), home: child);
+}
+
+/// A fake that never touches the real geolocator plugin (no platform
+/// implementation under `flutter test`) - every ChatRepository below gets
+/// one explicitly, since ChatRepository.ask now calls getCurrentLocation
+/// on every question (broadened 2026-08-09), not just "nearest" ones.
+class _NoLocation implements LocationService {
+  @override
+  Future<LocationResult> getCurrentLocation() async =>
+      const LocationResult.unavailable('no permission in test');
 }
 
 void main() {
@@ -26,9 +37,16 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      _wrap(ChatScreen(chatRepository: ChatRepository(client: MockClient(
-        (request) async => http.Response('{"answer":"unused"}', 200),
-      )))),
+      _wrap(
+        ChatScreen(
+          chatRepository: ChatRepository(
+            locationService: _NoLocation(),
+            client: MockClient(
+              (request) async => http.Response('{"answer":"unused"}', 200),
+            ),
+          ),
+        ),
+      ),
     );
 
     expect(find.textContaining('Ask about any station'), findsOneWidget);
@@ -38,6 +56,7 @@ void main() {
     tester,
   ) async {
     final repository = ChatRepository(
+      locationService: _NoLocation(),
       client: MockClient(
         (request) async => http.Response(
           '{"answer":"The next PATH train is in 7 min.",'
@@ -61,6 +80,7 @@ void main() {
     tester,
   ) async {
     final repository = ChatRepository(
+      locationService: _NoLocation(),
       client: MockClient(
         (request) async => http.Response('{"detail":"boom"}', 500),
       ),
@@ -77,6 +97,7 @@ void main() {
 
   testWidgets('the input is cleared after sending', (tester) async {
     final repository = ChatRepository(
+      locationService: _NoLocation(),
       client: MockClient(
         (request) async => http.Response('{"answer":"ok"}', 200),
       ),
@@ -95,6 +116,7 @@ void main() {
   testWidgets('does not send an empty/whitespace-only question', (tester) async {
     var wasCalled = false;
     final repository = ChatRepository(
+      locationService: _NoLocation(),
       client: MockClient((request) async {
         wasCalled = true;
         return http.Response('{"answer":"ok"}', 200);
@@ -112,6 +134,7 @@ void main() {
 
   testWidgets('the "New chat" action is hidden until a message exists', (tester) async {
     final repository = ChatRepository(
+      locationService: _NoLocation(),
       client: MockClient(
         (request) async => http.Response('{"answer":"ok"}', 200),
       ),
@@ -126,6 +149,7 @@ void main() {
     tester,
   ) async {
     final repository = ChatRepository(
+      locationService: _NoLocation(),
       client: MockClient(
         (request) async => http.Response(
           '{"answer":"The next PATH train is in 7 min.",'

@@ -66,7 +66,7 @@ from .commute_engine import recommend_for_station
 from .core.config import settings
 from .llm_phrasing import phrase_commute_recommendation
 from .models import ChatMessage, ChatSession, User
-from .path_topology import route_between_stations
+from .path_topology import adjacent_stations, route_between_stations
 from .station_index import (
     StationMatch,
     contains_whole,
@@ -149,6 +149,17 @@ two stations that this app cannot compute (e.g. it needs an agency or \
 station pair this app doesn't have real routing logic for). Say plainly \
 you can't plan that specific trip yet - never invent a route, a transfer \
 station, or a travel time you were not given.
+- {"kind": "next_station", "station": ..., "adjacent": [{"route": ..., \
+"direction": ..., "station": ...}, ...]} - real line-topology data (NOT \
+live arrival times - do not state or imply any minutes/wait time here) \
+about which real station(s) are next after the named one, per real PATH \
+route. A station on more than one route can have more than one real \
+"next station" in the same direction - state each one, tied to its real \
+route, never merged into a single guess.
+- {"kind": "next_station_unsupported"} - the user asked what station \
+comes next/before a station this app doesn't have real line-topology \
+data for. Say plainly you don't have that information for this station - \
+never invent an adjacent station.
 
 Rules you must never break:
 - Never invent a time, a station, a headsign/direction, or a fact not \
@@ -234,6 +245,17 @@ def _template_answer(context: dict) -> str:
             f"({first_wait}), then transfer to the {second['route']} train to "
             f"{destination} ({second_wait})."
         )
+    if kind == "next_station_unsupported":
+        return "I don't have real line information for that station."
+    if kind == "next_station":
+        station = context["station"]
+        parts = [
+            f"{a['station']} (toward NY on the {a['route']})"
+            if a["direction"] == "ToNY"
+            else f"{a['station']} (toward NJ on the {a['route']})"
+            for a in context["adjacent"]
+        ]
+        return f"After {station}, the next real stop is: " + "; ".join(parts) + "."
 
     arrivals = context["arrivals"]
     station = context["station"]
@@ -351,18 +373,24 @@ def _is_nearest_question(question: str) -> bool:
 
 
 def _is_routing_question(question: str) -> bool:
-    """Detects a "how do I get from A to B"/"fastest way from A to B"
-    trip-planning question - checked BEFORE the plain station-name match
-    below (see answer_question) for the same reason _is_nearest_question
-    is: a real bug shipped otherwise. "what's the fastest way from
-    Hoboken to World Trade Center" contains two real station names, so
-    find_stations happily returns matches and the old pipeline silently
-    answered using just ONE of them as if that addressed the whole
-    question - a real hallucination found live, not a hypothetical (see
-    OPEN_QUESTIONS.md, 2026-08-08). A question naming two-or-more
-    stations plus one of these routing verbs is a genuinely different
+    """Detects a genuinely two-station question - "how do I get from A to
+    B," "fastest way from A to B," or "next train TO A FROM B" - checked
+    BEFORE the plain station-name match below (see answer_question) for
+    the same reason _is_nearest_question is: a real bug shipped
+    otherwise. Any of these phrasings names two real, different stations
+    in one question, so find_stations happily returns both as matches
+    and the old pipeline silently answered using just ONE of them as if
+    that addressed the whole question - a real hallucination found live
+    TWICE now, not a hypothetical (see OPEN_QUESTIONS.md, 2026-08-08 and
+    2026-08-09): first for "fastest way"-style phrasing, then again for
+    "next train to X from Y" phrasing that the original fixed keyword
+    list didn't cover at all. Rather than keep enumerating specific verb
+    phrases as more get found, this also checks structurally: does the
+    question actually contain BOTH a real "from"/"to" pair, matching
+    _extract_two_stations's own real splitting logic? If so, it's a
+    two-station question regardless of which verb introduced it - a
     question this app either has real PATH-topology logic for
-    (route_between_stations) or must refuse honestly for - never silently
+    (route_between_stations) or must refuse honestly for, never silently
     answered as if it were a single-station arrivals question.
     """
     lowered = question.lower()
@@ -371,7 +399,33 @@ def _is_routing_question(question: str) -> bool:
         "how long does it take", "how long to get", "get from", "route from",
         "way from",
     )
-    return any(term in lowered for term in routing_terms)
+    if any(term in lowered for term in routing_terms):
+        return True
+    return _extract_two_stations(question) is not None
+
+
+_IMPLICIT_ORIGIN_TERMS = ("best way to reach", "how do i get to", "how do you get to", "reach")
+
+
+def _is_implicit_origin_routing_question(question: str) -> bool:
+    """Detects a real routing question with an IMPLICIT origin - "best
+    way to reach Newport now," "how do I get to Journal Square" - naming
+    only ONE station, where the real origin is wherever the user
+    currently is, not a second named station. A real gap found live,
+    2026-08-09: this used to fall straight through to a plain arrivals
+    answer for the one station it could find, silently ignoring that
+    the question was actually asking for directions FROM the user's real
+    current location, not just "what's arriving at Newport." Deliberately
+    checked only for a narrower verb set than _is_routing_question's
+    (which _extract_two_stations structurally covers) - "reach"/"get to"
+    alone is common enough in ordinary single-station phrasing that a
+    broader match here would misfire; see _answer_routing_question for
+    where this is actually used (only when real GPS is present AND
+    exactly one real station is named - both required before this ever
+    overrides the plain arrivals path).
+    """
+    lowered = question.lower()
+    return any(term in lowered for term in _IMPLICIT_ORIGIN_TERMS)
 
 
 def _is_direction_toggle_question(question: str) -> bool:
@@ -386,6 +440,25 @@ def _is_direction_toggle_question(question: str) -> bool:
     lowered = question.lower()
     toggle_terms = ("other direction", "other way", "opposite direction", "reverse direction")
     return any(term in lowered for term in toggle_terms)
+
+
+def _is_next_station_question(question: str) -> bool:
+    """Detects "what's the next station after X"/"what station comes
+    after X" - a real, genuinely different question type found live
+    2026-08-09: not an arrival-time question (no live data involved,
+    just real line topology) and not an A-to-B routing question (no
+    destination named) - this app had no concept of it at all before
+    this. Checked BEFORE the plain station-lookup path (see
+    answer_question) for the same "don't silently answer with the wrong
+    kind of data" reason every other intent classifier here is.
+    """
+    lowered = question.lower()
+    next_station_terms = (
+        "next station after", "station after", "stop after",
+        "next stop after", "what comes after", "what's after",
+        "station before", "stop before",
+    )
+    return any(term in lowered for term in next_station_terms)
 
 
 def _is_personal_question(question: str) -> bool:
@@ -508,7 +581,10 @@ def _extract_two_stations(question: str) -> tuple[StationMatch, StationMatch] | 
 
 
 async def _answer_routing_question(
-    question: str, history: list[ChatMessage] | None = None
+    question: str,
+    history: list[ChatMessage] | None = None,
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> ChatAnswer:
     """Answers a real "how do I get from A to B"/"fastest way from A to
     B" question - genuinely different from a plain arrivals question
@@ -517,12 +593,29 @@ async def _answer_routing_question(
     stations' arrivals). Only PATH pairs are supported today (see
     path_topology.py's module docstring for why - PATH's real topology is
     small/fixed enough to hardcode precisely; MTA/NJT would need real
-    graph-search routing, not a lookup table). Every other case - a
-    non-PATH pair, an ambiguous station name, or two stations PATH's own
-    topology table doesn't connect - is a real, honest "route_unsupported"
-    refusal, never a guessed route or invented transfer station.
+    graph-search routing, not a lookup table).
+
+    [lat]/[lng] enable a real IMPLICIT origin (added 2026-08-09, a real
+    gap found live: "best way to reach Newport now" names only ONE
+    station - the real origin is wherever the user currently is, not a
+    second named one - and used to fall straight through to a plain
+    arrivals answer for that one station, ignoring the actual routing
+    intent entirely). Only tried when _extract_two_stations finds no
+    explicit two-station structure AND the question matches
+    _is_implicit_origin_routing_question's narrower verb set - never
+    overrides an explicit two-station question, and never fires without
+    real coordinates.
+
+    Every unresolvable case - a non-PATH pair, an ambiguous station
+    name, no real coordinates for an implicit-origin question, or two
+    stations PATH's own topology table doesn't connect - is a real,
+    honest "route_unsupported" refusal, never a guessed route or
+    invented transfer station.
     """
     stations = _extract_two_stations(question)
+    if stations is None and lat is not None and lng is not None:
+        stations = _resolve_implicit_origin_route(question, lat, lng)
+
     if stations is None:
         context = {"kind": "route_unsupported"}
         text = _ask_llm(question, context, history) or _template_answer(context)
@@ -556,6 +649,79 @@ async def _answer_routing_question(
     }
     text = _ask_llm(question, context, history) or _template_answer(context)
     return ChatAnswer(text=text, station=destination)
+
+
+def _resolve_implicit_origin_route(
+    question: str, lat: float, lng: float
+) -> tuple[StationMatch, StationMatch] | None:
+    """The implicit-origin half of _answer_routing_question: exactly one
+    real PATH station named in the question, plus the real nearest PATH
+    station to the caller's actual coordinates as the origin. None (never
+    a guess) unless the question both matches
+    _is_implicit_origin_routing_question's verb set AND resolves to
+    exactly one unambiguous PATH destination, AND a real nearest PATH
+    station is genuinely findable from the given coordinates.
+    """
+    if not _is_implicit_origin_routing_question(question):
+        return None
+
+    destination_matches = [m for m in find_stations(question) if m.agency == "path"]
+    if len(destination_matches) != 1:
+        return None
+
+    nearby = nearest_stations(lat, lng, limit=1, agency="path")
+    if not nearby:
+        return None
+
+    origin = nearby[0].station
+    destination = destination_matches[0]
+    if origin.code == destination.code:
+        return None
+    return origin, destination
+
+
+async def _answer_next_station_question(
+    question: str, history: list[ChatMessage] | None = None
+) -> ChatAnswer:
+    """Answers "what's the next station after X" using PATH's real line
+    topology (path_topology.adjacent_stations) - a genuinely different
+    question from both a plain arrivals question (no live data involved
+    here at all, just real line order) and an A-to-B routing question
+    (no destination named). Only PATH stations are supported today, same
+    scope reasoning as _answer_routing_question - MTA/NJT's much larger
+    networks would need real per-line adjacency data this app doesn't
+    have. Refuses honestly ("next_station_unsupported") for a non-PATH
+    station, an ambiguous name, or a station with no real adjacency
+    (e.g. asking a genuinely wrong direction past a real terminus) -
+    never guesses an adjacent station.
+    """
+    matches = [m for m in find_stations(question) if m.agency == "path"]
+    if len(matches) != 1:
+        context = {"kind": "next_station_unsupported"}
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    station = matches[0]
+    adjacent = adjacent_stations(station.code)
+    if not adjacent:
+        context = {"kind": "next_station_unsupported"}
+        text = _ask_llm(question, context, history) or _template_answer(context)
+        return ChatAnswer(text=text, station=None)
+
+    context = {
+        "kind": "next_station",
+        "station": station.name,
+        "adjacent": [
+            {
+                "route": a.route,
+                "direction": a.direction,
+                "station": station_for("path", a.station_code).name,
+            }
+            for a in adjacent
+        ],
+    }
+    text = _ask_llm(question, context, history) or _template_answer(context)
+    return ChatAnswer(text=text, station=station)
 
 
 async def _answer_direction_toggle(
@@ -754,11 +920,16 @@ async def answer_question(
     handled specially - both are set together by the router or neither is.
 
     [lat]/[lng] are the caller's real device coordinates, if the client
-    both has location permission AND sent them (see routers/chat.py) -
-    used only for a "nearest station" question (see _is_nearest_question);
-    ignored entirely for every other question. Both None (no coordinates
-    sent, or the question isn't location-dependent) is the normal case
-    for most questions and callers.
+    has location permission (see routers/chat.py - the client now sends
+    these with EVERY question once granted, not just "nearest"-worded
+    ones, as of 2026-08-09). Used two ways: directly for an explicit
+    "nearest station" question (see _is_nearest_question), and as a real
+    fallback tier for a station-less question with no station resolvable
+    from this conversation's own history either - see the station-less
+    branch below. Never overrides a station the question or conversation
+    actually named; both None (no permission granted, or a client that
+    predates this) falls straight through to the existing no_match
+    refusal, same as before this fallback tier existed.
 
     [session_id] is the client-generated conversation id (see the module
     docstring's "real conversation memory" section) - None (the default,
@@ -787,8 +958,13 @@ async def answer_question(
         _persist_turn(db, session_id, user_id, question, answer)
         return answer
 
-    if _is_routing_question(question):
-        answer = await _answer_routing_question(question, history)
+    if _is_next_station_question(question):
+        answer = await _answer_next_station_question(question, history)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
+
+    if _is_routing_question(question) or _is_implicit_origin_routing_question(question):
+        answer = await _answer_routing_question(question, history, lat, lng)
         _persist_turn(db, session_id, user_id, question, answer)
         return answer
 
@@ -807,16 +983,28 @@ async def answer_question(
     matches = find_stations(question)
 
     if not matches:
-        # No station name in THIS question - a real prior turn in this
-        # same conversation may still resolve it (e.g. "what time's the
-        # next one" right after asking about a specific station). Only
-        # ever falls back to a station this session's own history
-        # actually named, never a guess synthesized from the question.
+        # No station name in THIS question. Resolution order, each tier
+        # only real data, never a guess: (1) a real prior turn in this
+        # same conversation may resolve it (e.g. "what time's the next
+        # one" right after asking about a specific station); (2) failing
+        # that, the caller's real current GPS position (if sent) resolves
+        # to the real nearest station - added 2026-08-09 after a real
+        # user expectation: a station-less question shouldn't need a
+        # station named just because the app happens to know where the
+        # user actually is. Only when both come up empty does this ask
+        # the user to clarify.
         fallback = _last_mentioned_station(history)
         if fallback is not None:
             answer = await _answer_for_match(question, fallback, db, user_id, history)
             _persist_turn(db, session_id, user_id, question, answer)
             return answer
+
+        if lat is not None and lng is not None:
+            nearby = nearest_stations(lat, lng, limit=1)
+            if nearby:
+                answer = await _answer_for_match(question, nearby[0].station, db, user_id, history)
+                _persist_turn(db, session_id, user_id, question, answer)
+                return answer
 
         context = {"kind": "no_match"}
         text = _ask_llm(question, context, history) or _template_answer(context)
@@ -955,9 +1143,29 @@ def _is_unambiguous(question: str, matches: list[StationMatch]) -> bool:
     - see OPEN_QUESTIONS.md), so a genuine name match alone isn't enough
     to safely pick one; this must still surface real options rather than
     silently guessing among them.
+
+    ALSO false when the question genuinely names two or more DIFFERENT
+    real stations (e.g. "next train to Newport from Journal Square") -
+    a real bug found live, 2026-08-09: this check only ever looked for
+    same-name collisions, so a question naming two real, different
+    stations sailed through as "unambiguous," silently answering with
+    whichever one find_stations ranked first (shortest name) and
+    discarding the other entirely. _is_routing_question is the primary
+    defense for this (broadened the same day to catch more real
+    phrasings structurally, not just a fixed verb list) - this is a
+    second, independent safety net for any phrasing that still slips
+    past it, so a genuinely different-named second station never gets
+    silently dropped either way.
     """
     top = matches[0]
     normalized_question = normalize(question)
     if not contains_whole(normalized_question, normalize(top.name)):
         return False
-    return not any(m is not top and normalize(m.name) == normalize(top.name) for m in matches)
+    if any(m is not top and normalize(m.name) == normalize(top.name) for m in matches):
+        return False
+    other_real_names = {
+        normalize(m.name)
+        for m in matches
+        if m is not top and contains_whole(normalized_question, normalize(m.name))
+    }
+    return not other_real_names
