@@ -1,19 +1,27 @@
 """Internal-only endpoints - not part of the mobile app's API surface, not
-meant to be called by any user. Both endpoints here trigger a nightly
-batch job that would otherwise have no way to run at all: Render's free
-tier has no built-in cron, and the web service itself spins down when
-idle, so nothing hosted there can reliably self-schedule.
+meant to be called by any user. The two job-trigger endpoints exist
+because Render's free tier has no built-in cron and the web service
+spins down when idle, so nothing hosted there can reliably self-schedule.
+The chat-debug endpoint exists for a narrower, real reason: diagnosing a
+live Chat AI bug report needs the actual transcript, and there's no
+other way to read it - no local dev machine has the real production
+DATABASE_URL, and Render's REST API has no remote-shell/exec endpoint
+for a web service. Same secret-guarded pattern as the job triggers, kept
+deliberately read-only (no action it triggers, nothing it can corrupt).
 """
 
 import hmac
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from ..core.config import settings
 from ..core.database import SessionLocal
 from ..home_office_engine import infer_home_and_office_for_all_users
 from ..jobs.send_commute_notifications import send_notifications_for_all_users
+from ..models import ChatMessage
 from ..preference_engine import recompute_all_preferences
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -72,3 +80,52 @@ async def run_preference_recompute_job(x_internal_secret: str | None = Header(de
         preferences_recomputed=preferences_recomputed,
         home_office_inferred=home_office_inferred,
     )
+
+
+class ChatMessageDebugRow(BaseModel):
+    session_id: str
+    role: str
+    content: str
+    station_agency: str | None
+    station_code: str | None
+    created_at: datetime
+
+
+@router.get("/recent-chat-messages", response_model=list[ChatMessageDebugRow])
+async def recent_chat_messages(
+    x_internal_secret: str | None = Header(default=None),
+    minutes: int = Query(default=5, ge=1, le=180),
+):
+    """Real chat turns from the last [minutes] minutes, newest first -
+    read-only, for debugging a live-reported Chat AI bug against the
+    actual production transcript rather than a guess or a reproduction
+    that might not match what really happened. No session_id filter
+    exposed here deliberately - the app's UI never shows the user their
+    own session id, so there's nothing for a caller to target one
+    specific conversation with; this always returns everything recent,
+    across every session, for manual inspection.
+    """
+    _verify_secret(x_internal_secret)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    db = SessionLocal()
+    try:
+        rows = db.scalars(
+            select(ChatMessage)
+            .where(ChatMessage.created_at >= cutoff)
+            .order_by(ChatMessage.id.desc())
+        ).all()
+    finally:
+        db.close()
+
+    return [
+        ChatMessageDebugRow(
+            session_id=str(row.session_id),
+            role=row.role,
+            content=row.content,
+            station_agency=row.station_agency,
+            station_code=row.station_code,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
