@@ -749,6 +749,129 @@ async def test_other_direction_with_no_prior_station_is_refused_honestly(db_sess
     assert result.station is None
 
 
+# --- Real code-level headsign-fidelity enforcement (2026-08-10) ---
+# Real bug found live via self-testing: even after adding an explicit
+# system-prompt rule forbidding it, the LLM still invented a completely
+# different, real-sounding destination ("Harrison") that didn't
+# correspond to ANY real headsign actually given - a prompt rule alone
+# wasn't reliably followed by this model under real load. Verified in
+# code instead of trusted blindly: _headsigns_are_faithful checks the
+# LLM's own text against the real data before ever returning it.
+
+
+class TestHeadsignsAreFaithful:
+    def test_a_fabricated_destination_not_in_the_real_data_is_rejected(self):
+        from app.chat_ai import _headsigns_are_faithful
+
+        context = {
+            "kind": "arrivals",
+            "station": "Hoboken",
+            "agency": "path",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 2.8, "headsign": "33rd Street"}],
+        }
+        text = "The next PATH train from Hoboken to Harrison is in 2.8 minutes."
+
+        assert _headsigns_are_faithful(text, context) is False
+
+    def test_text_using_only_the_real_given_headsign_is_accepted(self):
+        from app.chat_ai import _headsigns_are_faithful
+
+        context = {
+            "kind": "arrivals",
+            "station": "Hoboken",
+            "agency": "path",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 2.8, "headsign": "World Trade Center"}],
+        }
+        text = "The next PATH train from Hoboken to World Trade Center is in 2.8 minutes."
+
+        assert _headsigns_are_faithful(text, context) is True
+
+    def test_the_origin_station_name_itself_is_never_flagged_as_a_fabrication(self):
+        # Real false-positive found while building this check: the
+        # ORIGIN station (e.g. "Hoboken") is also a real PATH station
+        # name, and legitimately appears in any normal sentence - it
+        # must never be treated as an invented destination.
+        from app.chat_ai import _headsigns_are_faithful
+
+        context = {
+            "kind": "arrivals",
+            "station": "Hoboken",
+            "agency": "path",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 2.8, "headsign": "World Trade Center"}],
+        }
+        text = "The next PATH train from Hoboken to World Trade Center is in 2.8 minutes."
+
+        assert _headsigns_are_faithful(text, context) is True
+
+    def test_non_arrivals_contexts_are_never_checked(self):
+        from app.chat_ai import _headsigns_are_faithful
+
+        context = {"kind": "no_match"}
+        text = "Harrison is a real PATH station but this isn't an arrivals context."
+
+        assert _headsigns_are_faithful(text, context) is True
+
+    def test_arrivals_with_no_real_headsign_data_are_never_checked(self):
+        # MTA/other agencies with no headsign data at all - nothing to
+        # verify against, so this must not falsely reject real text.
+        from app.chat_ai import _headsigns_are_faithful
+
+        context = {
+            "kind": "arrivals",
+            "station": "Astoria-Ditmars Blvd",
+            "agency": "mta",
+            "arrivals": [{"route_label": "N", "minutes_until": 5.0}],
+        }
+        text = "The next N train from Astoria-Ditmars Blvd is in 5 minutes, headed toward Harrison."
+
+        assert _headsigns_are_faithful(text, context) is True
+
+
+@pytest.mark.asyncio
+async def test_a_hallucinated_headsign_is_discarded_for_the_real_template_answer(
+    monkeypatch, direction_aware_path_mock, db_session
+):
+    # Real end-to-end proof, mocking at the actual OpenAI client call (not
+    # _ask_llm itself) so the real fidelity check inside _ask_llm
+    # genuinely runs: even when the LLM returns text that invents a fake
+    # destination, the final answer never contains it - the real
+    # deterministic template (built directly from real data) is used
+    # instead, silently and automatically.
+    import app.chat_ai as chat_ai
+
+    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
+
+    class _FakeMessage:
+        content = "The next PATH train from Grove Street to Harrison is in 5 minutes."
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            return _FakeResponse()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        def __init__(self, *args, **kwargs):
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+
+    session_id = uuid.uuid4()
+    await answer_question("what's next from Grove Street", db=db_session, session_id=session_id)
+    result = await answer_question(
+        "what about the other direction", db=db_session, session_id=session_id
+    )
+
+    assert "Harrison" not in result.text
+
+
 @pytest.mark.asyncio
 async def test_other_direction_without_a_session_is_refused_honestly():
     # No session_id at all - there is no real prior turn to invert, same

@@ -57,6 +57,7 @@ every other piece of this feature.
 import re
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 
 from openai import OpenAI, OpenAIError
 from sqlalchemy import select
@@ -332,9 +333,74 @@ def _ask_llm(
             messages=messages,
         )
         text = response.choices[0].message.content
-        return text.strip() if text else None
+        text = text.strip() if text else None
     except OpenAIError:
         return None
+
+    if text is not None and not _headsigns_are_faithful(text, context):
+        # A real, repeated hallucination found live, 2026-08-10: a
+        # prompt rule alone ("never substitute a different place name")
+        # was not reliably followed by this model under real load - it
+        # invented a completely different, real-sounding station name
+        # (e.g. "Harrison") that does not correspond to ANY real headsign
+        # actually given, even after the rule was added. A system prompt
+        # is a request, not an enforced constraint on a model this size -
+        # so this is verified in code instead of trusted blindly: if the
+        # LLM's text mentions a real bundled station name that ISN'T one
+        # of the real headsigns actually present in context["arrivals"],
+        # discard the LLM's text entirely and fall back to the
+        # deterministic template, which is built directly from the real
+        # data and cannot invent a destination the same way.
+        return None
+    return text
+
+
+def _headsigns_are_faithful(text: str, context: dict) -> bool:
+    """True unless [text] names a real bundled station as a destination
+    that is NOT one of the real headsigns actually present in
+    context["arrivals"] - see _ask_llm's docstring for the bug this
+    guards against. Only checks contexts that carry real headsign data
+    at all (a plain "arrivals" context with 1+ arrival that has a
+    "headsign") - every other context kind returns True unchecked, since
+    this specific failure mode (substituting a different real place
+    name) has only ever been observed here.
+    """
+    if context.get("kind") != "arrivals":
+        return True
+    real_headsigns = {
+        a["headsign"] for a in context.get("arrivals", []) if a.get("headsign")
+    }
+    if not real_headsigns:
+        return True
+
+    lowered_text = normalize(text)
+    # Real names this text is ALLOWED to mention: every real headsign
+    # actually given, plus the station itself being asked about (the
+    # origin legitimately appears in a normal sentence - "the next train
+    # from Hoboken to X" - and is not a hallucinated destination).
+    allowed_names = {normalize(h) for h in real_headsigns}
+    if context.get("station"):
+        allowed_names.add(normalize(context["station"]))
+    other_real_names = {
+        normalized_name
+        for name in _all_path_station_names()
+        if (normalized_name := normalize(name)) not in allowed_names
+    }
+    return not any(contains_whole(lowered_text, name) for name in other_real_names if name)
+
+
+@lru_cache(maxsize=1)
+def _all_path_station_names() -> frozenset[str]:
+    """Every real PATH station name - deliberately PATH-only (not every
+    agency's ~5,900 names), since this check only ever runs for PATH's
+    own real headsign data (the only agency whose feed reports one at
+    all) - checking against MTA/NJT station names too would risk a false
+    positive on a real PATH station name that also happens to be a
+    substring of an unrelated MTA/NJT stop name.
+    """
+    from .station_index import _all_stations
+
+    return frozenset(s.name for s in _all_stations() if s.agency == "path")
 
 
 _CLOSING_REMARKS = {
