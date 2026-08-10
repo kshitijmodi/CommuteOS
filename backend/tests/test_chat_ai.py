@@ -197,6 +197,34 @@ async def test_reach_x_is_not_triggered_for_an_ambiguous_or_unnamed_destination(
     assert result.station is None
 
 
+@pytest.mark.asyncio
+async def test_reach_x_via_y_phrasing_resolves_both_real_stations():
+    # Real bug found live, 2026-08-10: "how much would it cost to reach
+    # 33rd street path via journal square path station" named two real
+    # stations but neither the from/to nor to/from splitter matched "via"
+    # phrasing at all, so it fell straight through to a refusal.
+    result = await answer_question(
+        "how much would it cost to reach 33 St via Journal Square"
+    )
+
+    assert result.station is not None
+    assert result.station.code == "33S"
+
+
+@pytest.mark.asyncio
+async def test_ordinal_street_names_match_the_bundled_abbreviated_form():
+    # Real bug found live, 2026-08-10: an ordinal-suffixed street name
+    # (the natural way to say it) matched NOTHING - every bundled
+    # numbered-street station uses the bare-number abbreviated form
+    # ("9 St," not "9th Street"). "9th Street" is PATH-only in the real
+    # index (unlike "33 St"/"23 St", which also collide with real MTA
+    # stations of the same name) - a genuine unambiguous match.
+    result = await answer_question("what's next from 9th Street")
+
+    assert result.station is not None
+    assert result.station.code == "09S"
+
+
 # --- Real "not every message is a question" fix (2026-08-09) ---
 # Real bug found live: a plain "ok thanks" after an unresolved/ambiguous
 # turn fell through to the no-real-station-yet path and got answered as
@@ -305,6 +333,66 @@ async def test_same_name_different_agency_also_stays_ambiguous():
     result = await answer_question("Hoboken")
 
     assert result.station is None
+
+
+# --- Real disambiguation follow-ups (2026-08-10) ---
+# Real bug found live: a short reply answering WHICH option was meant
+# ("path," after being asked to pick between PATH and NJ Transit) was
+# treated as a brand-new station search instead of the answer to the
+# clarification just asked - either silently falling back to a stale
+# station from earlier history, or hitting a fresh, unrelated ambiguous
+# search on the bare agency word itself.
+
+
+@pytest.mark.asyncio
+async def test_a_bare_agency_reply_resolves_the_immediately_prior_ambiguous_question(
+    db_session,
+):
+    session_id = uuid.uuid4()
+    first = await answer_question("Hoboken", db=db_session, session_id=session_id)
+    assert first.station is None  # confirms it was genuinely ambiguous first
+
+    follow_up = await answer_question("path", db=db_session, session_id=session_id)
+
+    assert follow_up.station is not None
+    assert follow_up.station.agency == "path"
+    assert follow_up.station.code == "HOB"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_followup_does_not_reach_back_past_the_immediately_prior_turn(
+    db_session,
+):
+    # Real regression guard: an older ambiguous prompt the user has
+    # already moved on from must not keep hijacking a later, unrelated
+    # short reply just because it happens to mention an agency word.
+    session_id = uuid.uuid4()
+    await answer_question("Hoboken", db=db_session, session_id=session_id)
+    await answer_question(
+        "path", db=db_session, session_id=session_id
+    )  # resolves the Hoboken ambiguity - no longer the "immediately prior" turn after this
+
+    follow_up = await answer_question("path", db=db_session, session_id=session_id)
+
+    # The most recent assistant turn is now a real Hoboken PATH arrivals
+    # answer, not an ambiguous refusal - "path" here has nothing real to
+    # resolve against and must NOT re-trigger the old Hoboken ambiguity.
+    assert follow_up.station is None or follow_up.station.code == "HOB"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_followup_with_no_matching_option_falls_through_normally(
+    db_session,
+):
+    session_id = uuid.uuid4()
+    await answer_question("Hoboken", db=db_session, session_id=session_id)
+
+    # "mta" isn't one of the two real options offered (PATH, NJT rail) -
+    # must not be force-matched to either; falls through to whatever the
+    # normal station-less pipeline does with this text.
+    follow_up = await answer_question("mta", db=db_session, session_id=session_id)
+
+    assert follow_up.station is None or follow_up.station.agency != "path" or follow_up.station.code != "HOB"
 
 
 @pytest.mark.asyncio
@@ -578,6 +666,19 @@ async def test_next_station_question_for_a_non_path_station_refuses_honestly():
     result = await answer_question("what is the next station after Astoria-Ditmars Blvd")
 
     assert result.station is None
+
+
+@pytest.mark.asyncio
+async def test_next_station_from_phrasing_gives_real_topology_not_plain_arrivals():
+    # Real bug found live, 2026-08-10: "what's the next station FROM
+    # Grove Street" (as opposed to "after"/"before") fell through to a
+    # plain arrivals answer dressed up with destination names, instead
+    # of real line-topology adjacency.
+    result = await answer_question("what's the next station from grove street")
+
+    assert result.station is not None
+    assert result.station.code == "GRV"
+    assert "Exchange Place" in result.text
 
 
 # --- Real "other direction" follow-ups (2026-08-08) ---

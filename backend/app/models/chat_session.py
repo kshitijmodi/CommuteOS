@@ -87,6 +87,17 @@ class ChatMessage(Base):
     # answer with no headsign data at all (MTA/other agencies never
     # report one), or any non-arrivals answer - never guessed.
     shown_headsigns: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The real (agency, code) pairs this assistant turn offered as
+    # options in a genuine "which station did you mean" refusal,
+    # pipe-and-comma-joined as "agency:code,agency:code" - e.g.
+    # "path:HOB,njt_rail:HB" (see chat_ai.py's
+    # _resolve_ambiguous_followup, added 2026-08-10 after a real bug: a
+    # short follow-up answering WHICH option was meant - e.g. just
+    # "path" - was being treated as a brand-new station search instead
+    # of the answer to the clarification just asked, since nothing
+    # recorded what the real options actually were). Null for a user
+    # turn or any non-ambiguous answer - never guessed or backfilled.
+    ambiguous_options: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

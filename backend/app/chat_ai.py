@@ -142,8 +142,14 @@ real coordinates. State the station name and the real distance in miles \
 ..., "board": ..., "alight": ..., "wait_minutes": ...}, ...]} - a real, \
 already-computed trip plan between two named stations, one or two real \
 legs (a second leg means a real transfer at the first leg's "alight" \
-station). State each leg's real wait time; if there are two legs, say \
-plainly that a transfer is needed and where.
+station). If "legs" has exactly ONE entry, this IS a real direct/one-seat \
+ride - you may say "direct" or "no transfer needed." If "legs" has TWO \
+entries, this trip REQUIRES a real transfer - you must NEVER say "yes, \
+direct" or "no transfer needed" for a two-leg answer, even if the \
+question asked "is there a direct way" - the honest answer to a \
+two-leg context is "no, you need to transfer at [the first leg's \
+alight station]," stated plainly, not "yes" followed by a transfer \
+description that contradicts it.
 - {"kind": "route_unsupported"} - the user asked for a route/trip between \
 two stations that this app cannot compute (e.g. it needs an agency or \
 station pair this app doesn't have real routing logic for). Say plainly \
@@ -162,6 +168,15 @@ data for. Say plainly you don't have that information for this station - \
 never invent an adjacent station.
 
 Rules you must never break:
+- context["kind"] is ALREADY the correct answer to what real data this \
+question got - it was decided before you were called, using the real \
+question text. If context.kind is "route", a real route WAS actually \
+computed - answer it as a route, using the real legs given, even if a \
+part of the question (e.g. "how much would it cost") asks about \
+something this context has no data for (like fare price); politely \
+note you don't have fare information IN ADDITION TO giving the real \
+route/timing data you DO have - never let an unanswerable side-question \
+make you discard or contradict the real data you were actually given.
 - Never invent a time, a station, a headsign/direction, or a fact not \
 present in the given context.
 - If context.kind is "arrivals" but the arrivals list is empty, say so \
@@ -195,6 +210,11 @@ class ChatAnswer:
     # every other kind of answer (refusals, routing, MTA/other agencies
     # with no headsign data) - never guessed or backfilled.
     headsigns: frozenset[str] | None = None
+    # The real (agency, code) options this answer offered, when it was a
+    # genuine "which station did you mean" ambiguous refusal - what a
+    # later short follow-up ("path") resolves against (see
+    # _resolve_ambiguous_followup). None for every other kind of answer.
+    ambiguous_options: tuple[StationMatch, ...] | None = None
 
 
 def _template_answer(context: dict) -> str:
@@ -457,6 +477,15 @@ def _is_next_station_question(question: str) -> bool:
         "next station after", "station after", "stop after",
         "next stop after", "what comes after", "what's after",
         "station before", "stop before",
+        # "next station FROM X" (as opposed to a plain "next train/
+        # arrival FROM X") - real bug found live, 2026-08-10: this
+        # phrasing was falling through to a plain arrivals answer
+        # dressed up as if it addressed line topology. Deliberately
+        # anchored on "station"/"stop", not bare "next...from", so a
+        # genuine "what's next from Grove Street" (arrivals) is never
+        # misclassified as this - the word "station"/"stop" right next
+        # to "next" is what makes this genuinely a topology question.
+        "next station from", "next stop from",
     )
     return any(term in lowered for term in next_station_terms)
 
@@ -548,30 +577,44 @@ def _agency_mentioned(question: str) -> str | None:
 # why that matters).
 _ROUTING_SPLIT_FROM_TO = re.compile(r"\bfrom\b(.+?)\bto\b(.+)", re.IGNORECASE)
 _ROUTING_SPLIT_TO_FROM = re.compile(r"\bto\b(.+?)\bfrom\b(.+)", re.IGNORECASE)
+# "reach/get to X via Y" - real bug found live, 2026-08-10: this
+# genuinely names two real stations (a destination and a waypoint the
+# user is near), but neither of the two patterns above match it at all
+# (no "from"/"to" pair - "via" isn't "from"). Treats the "via" station as
+# the near/origin side - matching how people actually phrase this
+# ("I'm at Y, how do I reach X via Y") - not a guess: still requires
+# each half to resolve to exactly one real PATH station, same as the
+# other two patterns.
+_ROUTING_SPLIT_VIA = re.compile(r"\b(?:reach|get to)\b(.+?)\bvia\b(.+)", re.IGNORECASE)
 
 
 def _extract_two_stations(question: str) -> tuple[StationMatch, StationMatch] | None:
-    """Splits a routing question on its real "from X to Y" (or "to Y from
-    X") structure and resolves each half independently via find_stations
-    - deliberately NOT reusing find_stations on the whole question
-    (that's exactly what caused the real hallucination bug: both halves'
-    station names get returned together with no way to tell which one is
-    the origin vs the destination). Returns None (never a guess) unless
-    BOTH halves resolve to exactly one real, unambiguous PATH station
-    each - a same-agency collision (e.g. "Hoboken" naming both a PATH and
-    an NJT rail station), a vague reference ("from there") with no real
-    station name of its own, or a station this app has no PATH-topology
-    entry for all correctly fall through to a real refusal in
-    _answer_routing_question, not a picked-at-random guess.
+    """Splits a routing question on its real "from X to Y" ("to Y from
+    X," or "reach X via Y") structure and resolves each half
+    independently via find_stations - deliberately NOT reusing
+    find_stations on the whole question (that's exactly what caused the
+    real hallucination bug: both halves' station names get returned
+    together with no way to tell which one is the origin vs the
+    destination). Returns None (never a guess) unless BOTH halves resolve
+    to exactly one real, unambiguous PATH station each - a same-agency
+    collision (e.g. "Hoboken" naming both a PATH and an NJT rail
+    station), a vague reference ("from there") with no real station name
+    of its own, or a station this app has no PATH-topology entry for all
+    correctly fall through to a real refusal in _answer_routing_question,
+    not a picked-at-random guess.
     """
     match = _ROUTING_SPLIT_FROM_TO.search(question)
     if match is not None:
         origin_text, destination_text = match.group(1), match.group(2)
     else:
         match = _ROUTING_SPLIT_TO_FROM.search(question)
-        if match is None:
-            return None
-        destination_text, origin_text = match.group(1), match.group(2)
+        if match is not None:
+            destination_text, origin_text = match.group(1), match.group(2)
+        else:
+            match = _ROUTING_SPLIT_VIA.search(question)
+            if match is None:
+                return None
+            destination_text, origin_text = match.group(1), match.group(2)
 
     origin_matches = [m for m in find_stations(origin_text) if m.agency == "path"]
     destination_matches = [m for m in find_stations(destination_text) if m.agency == "path"]
@@ -850,6 +893,64 @@ def _last_mentioned_station(history: list[ChatMessage]) -> StationMatch | None:
     return None
 
 
+def _last_ambiguous_options(history: list[ChatMessage]) -> tuple[StationMatch, ...] | None:
+    """The real (agency, code) options the most recent assistant turn
+    offered, if it was a genuine "which station did you mean" refusal -
+    what a later short follow-up answering WHICH one is meant (see
+    _resolve_ambiguous_followup) resolves against. A real bug found
+    live, 2026-08-10: a bare one-word reply like "path," meant to answer
+    exactly this kind of question, was instead treated as a brand-new
+    station search - nothing recorded what the real options actually
+    were, so there was nothing to resolve the short reply against. None
+    if the last real assistant turn wasn't an ambiguous refusal (never
+    reaches back further than the immediately preceding turn - an older
+    ambiguous prompt the user has already moved on from should not keep
+    hijacking later unrelated short replies).
+    """
+    if not history:
+        return None
+    last = history[-1]
+    if last.role != "assistant" or not last.ambiguous_options:
+        return None
+    options = []
+    for pair in last.ambiguous_options.split(","):
+        agency, _, code = pair.partition(":")
+        match = station_for(agency, code)
+        if match is not None:
+            options.append(match)
+    return tuple(options) if options else None
+
+
+def _resolve_ambiguous_followup(
+    question: str, history: list[ChatMessage]
+) -> StationMatch | None:
+    """If the immediately preceding assistant turn was a real "which
+    station did you mean" refusal, and this question is a short reply
+    that names exactly ONE of those real options (by agency term or by
+    a real "toward" hint), resolve directly to it - rather than treating
+    the reply as a brand-new station search, which is what caused the
+    real bug (see _last_ambiguous_options's docstring): searching fresh
+    for a bare word like "path" either found nothing relevant, or found
+    something entirely unrelated to the actual question just asked.
+    Returns None (never a guess) unless exactly one real option matches.
+    """
+    options = _last_ambiguous_options(history)
+    if not options:
+        return None
+
+    lowered = question.lower()
+    matched = [
+        option
+        for option in options
+        if _agency_mentioned(lowered) == option.agency
+        or (option.toward and option.toward.lower() in lowered)
+        or option.agency.replace("_", " ") in lowered
+    ]
+    if len(matched) == 1:
+        return matched[0]
+    return None
+
+
 def _last_shown_headsigns(history: list[ChatMessage]) -> set[str] | None:
     """The real destination(s) the most recent assistant turn recorded as
     "shown" - see _save_turn's [headsigns] param. Deliberately just the
@@ -879,6 +980,7 @@ def _save_turn(
     content: str,
     station: StationMatch | None = None,
     headsigns: frozenset[str] | None = None,
+    ambiguous_options: tuple[StationMatch, ...] | None = None,
 ) -> None:
     db.add(
         ChatMessage(
@@ -888,6 +990,11 @@ def _save_turn(
             station_agency=station.agency if station else None,
             station_code=station.code if station else None,
             shown_headsigns=",".join(sorted(headsigns)) if headsigns else None,
+            ambiguous_options=(
+                ",".join(f"{m.agency}:{m.code}" for m in ambiguous_options)
+                if ambiguous_options
+                else None
+            ),
         )
     )
     db.commit()
@@ -942,6 +1049,18 @@ async def answer_question(
     history = (
         _load_recent_history(db, session_id) if db is not None and session_id else []
     )
+
+    ambiguous_followup = _resolve_ambiguous_followup(question, history)
+    if ambiguous_followup is not None:
+        # A real bug found live, 2026-08-10: a short reply that answers
+        # WHICH option was meant ("path," after being asked to pick
+        # between PATH and NJ Transit) was being treated as a brand-new
+        # station search instead of the answer to the clarification just
+        # asked - checked before every other classifier below so it
+        # never falls through to an unrelated fresh search or refusal.
+        answer = await _answer_for_match(question, ambiguous_followup, db, user_id, history)
+        _persist_turn(db, session_id, user_id, question, answer)
+        return answer
 
     if _is_conversation_closer(question):
         # A plain "ok thanks"/"got it" isn't a question at all - never
@@ -1020,7 +1139,7 @@ async def answer_question(
             ],
         }
         text = _ask_llm(question, context, history) or _template_answer(context)
-        answer = ChatAnswer(text=text, station=None)
+        answer = ChatAnswer(text=text, station=None, ambiguous_options=tuple(matches))
         _persist_turn(db, session_id, user_id, question, answer)
         return answer
 
@@ -1100,7 +1219,10 @@ def _persist_turn(
         return
     _ensure_session(db, session_id, user_id)
     _save_turn(db, session_id, "user", question)
-    _save_turn(db, session_id, "assistant", answer.text, answer.station, answer.headsigns)
+    _save_turn(
+        db, session_id, "assistant", answer.text, answer.station,
+        answer.headsigns, answer.ambiguous_options,
+    )
 
 
 async def _try_personalized_answer(db: Session, user_id, match: StationMatch) -> ChatAnswer | None:

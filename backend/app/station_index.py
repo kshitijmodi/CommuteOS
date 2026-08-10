@@ -70,8 +70,33 @@ class StationMatch:
     lng: float | None = None
 
 
+_ORDINAL_SUFFIX = re.compile(r"\b(\d+)(st|nd|rd|th)\b")
+# Real bundled station names use the abbreviated form ("33 St," not "33
+# Street") - matched here so "33rd Street"/"33 Street" normalize the
+# same as the real "33 St" name, without needing multiple copies of
+# every numbered station's name in the index. Word-boundary anchored so
+# this only ever expands/contracts a real standalone word, never a
+# fragment inside an unrelated one.
+_STREET_ABBREVIATION = re.compile(r"\bstreet\b")
+_AVENUE_ABBREVIATION = re.compile(r"\bavenue\b")
+
+
 def normalize(text: str) -> str:
-    return re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+    """Lowercase + strip punctuation, same as before, PLUS two real
+    equivalence fixes found live, 2026-08-10, both needed together to
+    make "33rd Street" match the bundled "33 St": (1) strip ordinal
+    suffixes off numbers ("33rd" -> "33") - confirmed across 91 real
+    bundled stations that use the bare-number form (e.g. "14 St," "125
+    St," "103 St-Corona Plaza"), and (2) abbreviate "Street"/"Avenue" to
+    "St"/"Ave" - the form every one of those bundled names actually
+    uses. Both are safe, unambiguous transformations (neither changes
+    which real place is meant, only its surface spelling).
+    """
+    lowered = re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+    lowered = _ORDINAL_SUFFIX.sub(r"\1", lowered)
+    lowered = _STREET_ABBREVIATION.sub("st", lowered)
+    lowered = _AVENUE_ABBREVIATION.sub("ave", lowered)
+    return lowered
 
 
 @lru_cache(maxsize=1)

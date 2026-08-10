@@ -20,8 +20,22 @@ def test_contains_whole_returns_false_for_an_empty_needle():
 
 
 def test_normalize_strips_punctuation_and_lowercases():
-    assert normalize("Grove Street!") == "grove street"
+    # "Street" -> "St" is a deliberate real-equivalence fix (2026-08-10) -
+    # see normalize's own docstring for why: every bundled numbered-street
+    # station name uses the abbreviated form, so this must too, or a
+    # perfectly natural "Grove Street" (still just punctuation/case
+    # stripped) wouldn't match some of what "grove st" is supposed to.
+    assert normalize("Grove Street!") == "grove st"
     assert normalize("33 St") == "33 st"
+
+
+def test_normalize_treats_ordinal_and_full_word_street_names_as_equivalent():
+    # Real bug found live, 2026-08-10: "33rd Street" (the natural way to
+    # say it) normalized completely differently from the bundled "33 St" -
+    # both forms, and the fully-abbreviated one, must all agree.
+    assert normalize("33rd Street") == normalize("33 St")
+    assert normalize("33rd St") == normalize("33 St")
+    assert normalize("14th Avenue") == normalize("14 Ave")
 
 
 def test_find_stations_matches_a_real_station_by_exact_name():
