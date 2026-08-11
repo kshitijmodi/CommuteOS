@@ -59,13 +59,15 @@ class TestAdjacentStations:
     def test_grove_street_has_real_adjacent_stations_on_two_routes(self):
         # Real fact confirmed via research: Grove Street sits on both
         # NWK_WTC (Exchange Place toward NY, Journal Square toward NJ)
-        # and JSQ_33 (Christopher St toward NY, Journal Square toward NJ).
+        # and JSQ_33 (Newport toward NY, Journal Square toward NJ - a
+        # real topology correction, 2026-08-10/11: JSQ_33's real station
+        # list was missing Newport entirely, see this module's docstring).
         results = adjacent_stations("GRV")
 
         by_route_direction = {(a.route, a.direction): a.station_code for a in results}
         assert by_route_direction[("NWK_WTC", "ToNY")] == "EXP"
         assert by_route_direction[("NWK_WTC", "ToNJ")] == "JSQ"
-        assert by_route_direction[("JSQ_33", "ToNY")] == "CHR"
+        assert by_route_direction[("JSQ_33", "ToNY")] == "NEW"
         assert by_route_direction[("JSQ_33", "ToNJ")] == "JSQ"
 
     def test_a_terminus_has_no_adjacent_station_in_the_direction_past_it(self):

@@ -20,27 +20,43 @@ which would need a real graph-search implementation, not a lookup table
 (explicitly out of scope for now - see route_between's docstring).
 
 Deliberately NOT modeling frequency/schedule/off-peak service changes
-(e.g. the JSQ_33_HOB late-night-only combined route) - this only answers
-"is there a real one-seat ride, and if not, where's the real transfer,"
-using each route's ALWAYS-active real topology. A specific trip that only
-runs late-night is a real scheduling nuance callers should still confirm
-against live arrivals, which this module doesn't fetch - see
-chat_ai.route_between_stations for how the real live arrival check is
-layered on top of this purely-topological lookup.
+(e.g. the JSQ_33_HOB late-night/weekend "via Hoboken" variant) - this
+only answers "is there a real one-seat ride, and if not, where's the
+real transfer," using each route's ALWAYS-active real topology. A
+specific trip that only runs late-night is a real scheduling nuance
+callers should still confirm against live arrivals, which this module
+doesn't fetch - see chat_ai.route_between_stations for how the real
+live arrival check is layered on top of this purely-topological lookup.
+
+Real correction, 2026-08-10/11 (see OPEN_QUESTIONS.md): JSQ_33's real
+station list was missing Newport entirely, wrongly modeling Grove
+Street<->Newport as needing a transfer at Exchange Place when a real,
+direct, all-day weekday JSQ_33 train actually runs Journal Square ->
+Grove Street -> Newport -> Christopher St -> ... -> 33rd Street. Found
+via a real user correction, verified against PATH's own live API
+(both stations reporting the same real "33rd Street via Hoboken"
+headsign/lineColor at the same live moment) and independently
+cross-checked against Wikipedia's Grove Street/Newport station articles
+before fixing - this was a real hardcoded-data error, not a phrasing or
+prompt issue, so the fix belongs here, not in chat_ai.py.
 """
 
 from dataclasses import dataclass
 
 # Each PATH station's real code -> which of PATH's 4 standard routes stop
 # there, in the order the trains actually run. NPT_HOB (the rare
-# contingency shuttle) and JSQ_33_HOB (late-night-only combined service)
-# are deliberately excluded - both are real but not part of PATH's
-# always-available standard service, and including them would make a
-# late-night-only path look like a real one-seat ride at 2pm on a Tuesday.
+# contingency shuttle) and the late-night/weekend-only "via Hoboken"
+# JSQ_33 variant (a real, different routing that detours through
+# Hoboken instead of Newport) are deliberately excluded - real, but not
+# part of PATH's always-available standard service, and including them
+# would make a late-night-only path look like a real one-seat ride at
+# 2pm on a Tuesday. The PLAIN JSQ_33 route below (via Newport, not via
+# Hoboken) DOES run standard weekday daytime service - confirmed real,
+# not excluded.
 _ROUTES: dict[str, list[str]] = {
     "NWK_WTC": ["NWK", "HAR", "JSQ", "GRV", "EXP", "WTC"],
     "HOB_WTC": ["HOB", "NEW", "EXP", "WTC"],
-    "JSQ_33": ["JSQ", "GRV", "CHR", "09S", "14S", "23S", "33S"],
+    "JSQ_33": ["JSQ", "GRV", "NEW", "CHR", "09S", "14S", "23S", "33S"],
     "HOB_33": ["HOB", "CHR", "09S", "14S", "23S", "33S"],
 }
 
@@ -49,7 +65,7 @@ _ROUTES: dict[str, list[str]] = {
 # without leaving the system. Derived from _ROUTES itself below, listed
 # explicitly here only for the module docstring's benefit; the real
 # computation lives in _transfer_stations().
-_KNOWN_TRANSFER_STATIONS = {"JSQ", "GRV", "EXP", "HOB"}
+_KNOWN_TRANSFER_STATIONS = {"JSQ", "GRV", "NEW", "EXP", "HOB"}
 
 
 @dataclass(frozen=True)

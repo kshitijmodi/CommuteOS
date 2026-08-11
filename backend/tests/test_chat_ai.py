@@ -163,8 +163,10 @@ async def test_conversation_history_is_preferred_over_gps_fallback(db_session):
 @pytest.mark.asyncio
 async def test_reach_x_with_real_gps_routes_from_the_real_nearest_station():
     # Real coordinates at Journal Square's own location - the real
-    # nearest PATH station should become the implicit origin, routed to
-    # Newport via the real transfer at Exchange Place.
+    # nearest PATH station should become the implicit origin. Journal
+    # Square -> Newport is a genuine direct ride on JSQ_33 (a real
+    # topology correction, 2026-08-10/11 - see path_topology.py's module
+    # docstring - this used to be wrongly modeled as needing a transfer).
     result = await answer_question(
         "What is the best way to reach Newport mall now?",
         lat=40.7318097,
@@ -173,7 +175,7 @@ async def test_reach_x_with_real_gps_routes_from_the_real_nearest_station():
 
     assert result.station is not None
     assert result.station.code == "NEW"
-    assert "Exchange Place" in result.text
+    assert "Journal Square" in result.text
 
 
 @pytest.mark.asyncio
@@ -615,6 +617,8 @@ async def test_next_train_to_x_from_y_phrasing_is_recognized_as_routing():
     # phrasing), so it silently answered with Newport's own arrivals,
     # discarding the real "from Journal Square" half of the question
     # entirely and answering trains FROM Newport instead of TO it.
+    # Journal Square -> Newport is a genuine direct ride on JSQ_33 (a
+    # real topology correction, 2026-08-10/11 - see path_topology.py).
     result = await answer_question(
         "What is the next train to newport from journal square path?"
     )
@@ -622,7 +626,6 @@ async def test_next_train_to_x_from_y_phrasing_is_recognized_as_routing():
     assert result.station is not None
     assert result.station.code == "NEW"
     assert "Journal Square" in result.text
-    assert "transfer" in result.text.lower() or "Exchange Place" in result.text
 
 
 @pytest.mark.asyncio
