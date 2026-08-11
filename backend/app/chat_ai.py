@@ -133,7 +133,12 @@ direction hint, e.g. "Kearny" - two options can share the exact same \
 name but have different "toward" values, meaning they are genuinely \
 different real stops). List the options using the "toward" value to \
 tell them apart whenever it is present, and ask the user to pick one; \
-do not silently pick for them.
+do not silently pick for them. If the "name" values in "options" are \
+DIFFERENT from each other (e.g. "Grove Street" and "Journal Square," \
+not two entries both named "Hoboken"), phrase this as "did you mean X \
+or Y" - never as "which [name] station do you mean," which wrongly \
+implies one single station name has multiple versions when the real \
+ambiguity is between two entirely different named places.
 - {"kind": "out_of_scope"} - the question is not about NYC-metro transit \
 arrival times (e.g. fares, crowding levels, weather, anything outside \
 subway/rail/bus arrivals). Say plainly you don't have that information - \
@@ -365,6 +370,8 @@ def _answer_is_faithful(text: str, context: dict) -> bool:
         return _headsigns_are_faithful(text, context)
     if kind == "route":
         return _route_leg_count_is_faithful(text, context)
+    if kind == "next_station":
+        return _next_station_answer_is_complete(text, context)
     return True
 
 
@@ -444,6 +451,32 @@ def _route_leg_count_is_faithful(text: str, context: dict) -> bool:
     if any(agency in lowered_text for agency in other_agencies):
         return False
     return True
+
+
+def _next_station_answer_is_complete(text: str, context: dict) -> bool:
+    """True unless [text] OMITS a real adjacent station actually given
+    in context["adjacent"] - a real bug found live, 2026-08-11: Grove
+    Street genuinely has 4 real adjacency facts (two routes, two
+    directions each), but the LLM's answer only mentioned 2 of them,
+    silently dropping a real, correct fact (Newport, on JSQ_33) rather
+    than inventing a wrong one - the same "don't trust the LLM's output
+    blindly" posture as the other _answer_is_faithful checks, just for
+    completeness instead of correctness. Every real adjacent station
+    name must appear as a whole word in the text, or the answer is
+    incomplete and gets discarded for the deterministic template (which
+    is built by iterating the real list directly and cannot drop an
+    entry the same way).
+    """
+    adjacent = context.get("adjacent", [])
+    if not adjacent:
+        return True
+
+    lowered_text = normalize(text)
+    return all(
+        contains_whole(lowered_text, normalize(a["station"]))
+        for a in adjacent
+        if a.get("station")
+    )
 
 
 @lru_cache(maxsize=1)

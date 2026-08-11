@@ -981,6 +981,104 @@ async def test_a_hallucinated_route_transfer_is_discarded_for_the_real_template_
     assert "Exchange Place" not in result.text
 
 
+class TestNextStationAnswerIsComplete:
+    def test_an_answer_dropping_a_real_adjacent_station_is_rejected(self):
+        # Real case found live, 2026-08-11: Grove Street genuinely has 4
+        # real adjacency facts (two routes, two directions each), but the
+        # LLM's answer only mentioned 2 of them, silently dropping Newport
+        # (a real fact on JSQ_33) rather than inventing a wrong one.
+        from app.chat_ai import _next_station_answer_is_complete
+
+        context = {
+            "kind": "next_station",
+            "station": "Grove Street",
+            "adjacent": [
+                {"route": "JSQ_33", "direction": "ToNY", "station": "Newport"},
+                {"route": "JSQ_33", "direction": "ToNJ", "station": "Journal Square"},
+                {"route": "NWK_WTC", "direction": "ToNY", "station": "Exchange Place"},
+                {"route": "NWK_WTC", "direction": "ToNJ", "station": "Journal Square"},
+            ],
+        }
+        text = (
+            "After Grove Street, you'll reach Exchange Place or Journal "
+            "Square, depending on direction."
+        )
+
+        assert _next_station_answer_is_complete(text, context) is False
+
+    def test_an_answer_naming_every_real_adjacent_station_is_accepted(self):
+        from app.chat_ai import _next_station_answer_is_complete
+
+        context = {
+            "kind": "next_station",
+            "station": "Grove Street",
+            "adjacent": [
+                {"route": "JSQ_33", "direction": "ToNY", "station": "Newport"},
+                {"route": "JSQ_33", "direction": "ToNJ", "station": "Journal Square"},
+                {"route": "NWK_WTC", "direction": "ToNY", "station": "Exchange Place"},
+                {"route": "NWK_WTC", "direction": "ToNJ", "station": "Journal Square"},
+            ],
+        }
+        text = (
+            "From Grove Street: toward New York you'll reach Newport (JSQ_33) "
+            "or Exchange Place (NWK_WTC); toward New Jersey both routes go to "
+            "Journal Square."
+        )
+
+        assert _next_station_answer_is_complete(text, context) is True
+
+    def test_no_adjacent_stations_in_context_is_vacuously_complete(self):
+        from app.chat_ai import _next_station_answer_is_complete
+
+        context = {"kind": "next_station_unsupported"}
+        text = "I don't have next-station data for that station."
+
+        assert _next_station_answer_is_complete(text, context) is True
+
+
+@pytest.mark.asyncio
+async def test_an_incomplete_next_station_answer_is_discarded_for_the_real_template_answer(
+    monkeypatch, db_session
+):
+    # Real end-to-end proof, mocking at the actual OpenAI client call so
+    # the real completeness check inside _ask_llm genuinely runs: even
+    # when the LLM's answer silently drops a real adjacent station, the
+    # final answer always names every real one (via the deterministic
+    # template, built by iterating the real adjacency list directly).
+    import app.chat_ai as chat_ai
+
+    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
+
+    class _FakeMessage:
+        content = (
+            "After Grove Street, the next stop is Exchange Place or "
+            "Journal Square, depending on which direction you're headed."
+        )
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            return _FakeResponse()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        def __init__(self, *args, **kwargs):
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+
+    result = await answer_question("what is the next station after grove street")
+
+    assert "Newport" in result.text
+
+
 @pytest.mark.asyncio
 async def test_a_hallucinated_headsign_is_discarded_for_the_real_template_answer(
     monkeypatch, direction_aware_path_mock, db_session
