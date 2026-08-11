@@ -830,6 +830,157 @@ class TestHeadsignsAreFaithful:
         assert _headsigns_are_faithful(text, context) is True
 
 
+# --- Real code-level route-transfer fidelity enforcement (2026-08-11) ---
+# Real bug found live via self-testing: a genuine ONE-leg direct route
+# (Grove Street to Newport) was described with a completely invented
+# transfer at Exchange Place and a fabricated second leg that don't
+# exist anywhere in the real context given - the same class of bug as
+# the earlier headsign fabrication, just for routing text.
+
+
+class TestRouteLegCountIsFaithful:
+    def test_a_fabricated_transfer_for_a_real_direct_route_is_rejected(self):
+        from app.chat_ai import _route_leg_count_is_faithful
+
+        context = {
+            "kind": "route",
+            "origin": "Grove Street",
+            "destination": "Newport",
+            "legs": [{"route": "JSQ_33", "board": "Grove Street", "alight": "Newport", "wait_minutes": 1.0}],
+        }
+        text = "You need to transfer at Exchange Place to get from Grove Street to Newport."
+
+        assert _route_leg_count_is_faithful(text, context) is False
+
+    def test_a_real_direct_route_described_as_direct_is_accepted(self):
+        from app.chat_ai import _route_leg_count_is_faithful
+
+        context = {
+            "kind": "route",
+            "origin": "Grove Street",
+            "destination": "Newport",
+            "legs": [{"route": "JSQ_33", "board": "Grove Street", "alight": "Newport", "wait_minutes": 1.0}],
+        }
+        text = "Take the JSQ_33 train directly from Grove Street to Newport."
+
+        assert _route_leg_count_is_faithful(text, context) is True
+
+    def test_a_fabricated_direct_claim_for_a_real_transfer_route_is_rejected(self):
+        from app.chat_ai import _route_leg_count_is_faithful
+
+        context = {
+            "kind": "route",
+            "origin": "Newark",
+            "destination": "Hoboken",
+            "legs": [
+                {"route": "NWK_WTC", "board": "Newark", "alight": "Exchange Place", "wait_minutes": 2.0},
+                {"route": "HOB_WTC", "board": "Exchange Place", "alight": "Hoboken", "wait_minutes": 1.0},
+            ],
+        }
+        text = "There is a direct train from Newark to Hoboken, no transfer needed."
+
+        assert _route_leg_count_is_faithful(text, context) is False
+
+    def test_a_real_transfer_route_correctly_described_is_accepted(self):
+        from app.chat_ai import _route_leg_count_is_faithful
+
+        context = {
+            "kind": "route",
+            "origin": "Newark",
+            "destination": "Hoboken",
+            "legs": [
+                {"route": "NWK_WTC", "board": "Newark", "alight": "Exchange Place", "wait_minutes": 2.0},
+                {"route": "HOB_WTC", "board": "Exchange Place", "alight": "Hoboken", "wait_minutes": 1.0},
+            ],
+        }
+        text = "Transfer at Exchange Place: take the train from Newark, then transfer to Hoboken."
+
+        assert _route_leg_count_is_faithful(text, context) is True
+
+    def test_per_leg_direct_wording_within_a_real_transfer_is_not_falsely_rejected(self):
+        # Real case observed live: each individual leg described as "a
+        # direct ride" is legitimate as long as the overall transfer is
+        # still mentioned - only an OVERALL "direct, no transfer" claim
+        # for a genuine two-leg trip is a fabrication.
+        from app.chat_ai import _route_leg_count_is_faithful
+
+        context = {
+            "kind": "route",
+            "origin": "Newark",
+            "destination": "Hoboken",
+            "legs": [
+                {"route": "NWK_WTC", "board": "Newark", "alight": "Exchange Place", "wait_minutes": 2.0},
+                {"route": "HOB_WTC", "board": "Exchange Place", "alight": "Hoboken", "wait_minutes": 1.0},
+            ],
+        }
+        text = (
+            "You need to transfer at Exchange Place. The first leg is a direct "
+            "ride from Newark to Exchange Place, and the second leg is a direct "
+            "ride from Exchange Place to Hoboken."
+        )
+
+        assert _route_leg_count_is_faithful(text, context) is True
+
+    def test_naming_a_different_real_agency_for_a_path_only_route_is_rejected(self):
+        # Real case found live: a route leg is always a real PATH ride
+        # (this module only computes PATH topology) - naming any other
+        # agency is inventing a fact not present in the given context.
+        from app.chat_ai import _route_leg_count_is_faithful
+
+        context = {
+            "kind": "route",
+            "origin": "Newark",
+            "destination": "Hoboken",
+            "legs": [
+                {"route": "NWK_WTC", "board": "Newark", "alight": "Exchange Place", "wait_minutes": 2.0},
+                {"route": "HOB_WTC", "board": "Exchange Place", "alight": "Hoboken", "wait_minutes": 1.0},
+            ],
+        }
+        text = "Take the NJ Transit train from Newark to Exchange Place, then transfer to a PATH train to Hoboken."
+
+        assert _route_leg_count_is_faithful(text, context) is False
+
+
+@pytest.mark.asyncio
+async def test_a_hallucinated_route_transfer_is_discarded_for_the_real_template_answer(
+    monkeypatch, db_session
+):
+    # Real end-to-end proof, mocking at the actual OpenAI client call so
+    # the real fidelity check inside _ask_llm genuinely runs: even when
+    # the LLM invents a transfer for a real direct route, the final
+    # answer never contains it.
+    import app.chat_ai as chat_ai
+
+    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
+
+    class _FakeMessage:
+        content = "You need to transfer at Exchange Place to get from Grove Street to Newport."
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            return _FakeResponse()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        def __init__(self, *args, **kwargs):
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+
+    result = await answer_question("how do I get from Grove Street to Newport")
+
+    assert "transfer" not in result.text.lower()
+    assert "Exchange Place" not in result.text
+
+
 @pytest.mark.asyncio
 async def test_a_hallucinated_headsign_is_discarded_for_the_real_template_answer(
     monkeypatch, direction_aware_path_mock, db_session

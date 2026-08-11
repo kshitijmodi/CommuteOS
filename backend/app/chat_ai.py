@@ -337,22 +337,35 @@ def _ask_llm(
     except OpenAIError:
         return None
 
-    if text is not None and not _headsigns_are_faithful(text, context):
-        # A real, repeated hallucination found live, 2026-08-10: a
-        # prompt rule alone ("never substitute a different place name")
-        # was not reliably followed by this model under real load - it
-        # invented a completely different, real-sounding station name
-        # (e.g. "Harrison") that does not correspond to ANY real headsign
-        # actually given, even after the rule was added. A system prompt
-        # is a request, not an enforced constraint on a model this size -
-        # so this is verified in code instead of trusted blindly: if the
-        # LLM's text mentions a real bundled station name that ISN'T one
-        # of the real headsigns actually present in context["arrivals"],
-        # discard the LLM's text entirely and fall back to the
-        # deterministic template, which is built directly from the real
-        # data and cannot invent a destination the same way.
+    if text is not None and not _answer_is_faithful(text, context):
+        # A real, repeated hallucination pattern found live, first
+        # 2026-08-10 (fabricated headsigns) then again 2026-08-11
+        # (fabricated route transfers) - a prompt rule alone ("never
+        # substitute a different place name"/"never say direct for a
+        # two-leg route") is a request, not an enforced constraint, on
+        # this model under real load. Both failure modes are verified in
+        # code instead of trusted blindly - see _answer_is_faithful. If
+        # either check fails, discard the LLM's text entirely and fall
+        # back to the deterministic template, which is built directly
+        # from the real data and cannot invent a destination or a
+        # transfer the same way.
         return None
     return text
+
+
+def _answer_is_faithful(text: str, context: dict) -> bool:
+    """True unless [text] contradicts the real data it was given -
+    dispatches to the specific check for this context["kind"]. Every
+    context kind with no known real failure mode returns True
+    unchecked - this only grows as new hallucination patterns are
+    actually found live, never speculatively.
+    """
+    kind = context.get("kind")
+    if kind == "arrivals":
+        return _headsigns_are_faithful(text, context)
+    if kind == "route":
+        return _route_leg_count_is_faithful(text, context)
+    return True
 
 
 def _headsigns_are_faithful(text: str, context: dict) -> bool:
@@ -365,8 +378,6 @@ def _headsigns_are_faithful(text: str, context: dict) -> bool:
     this specific failure mode (substituting a different real place
     name) has only ever been observed here.
     """
-    if context.get("kind") != "arrivals":
-        return True
     real_headsigns = {
         a["headsign"] for a in context.get("arrivals", []) if a.get("headsign")
     }
@@ -387,6 +398,52 @@ def _headsigns_are_faithful(text: str, context: dict) -> bool:
         if (normalized_name := normalize(name)) not in allowed_names
     }
     return not any(contains_whole(lowered_text, name) for name in other_real_names if name)
+
+
+_TRANSFER_TERMS = ("transfer", "change trains", "switch trains")
+_DIRECT_TERMS = ("direct", "no transfer", "one-seat", "one seat")
+
+
+def _route_leg_count_is_faithful(text: str, context: dict) -> bool:
+    """True unless [text] describes a transfer for a real ONE-leg
+    (direct) route context, or describes a direct/no-transfer ride for a
+    real TWO-leg (transfer required) route context - a real bug found
+    live, 2026-08-11: a genuine one-leg direct ride (Grove Street to
+    Newport) was described with an invented "transfer at Exchange Place"
+    and a fabricated second leg that don't exist anywhere in the real
+    context given. The earlier prompt rule ("a two-leg route is never
+    direct") only ever covered the reverse direction of this exact
+    failure mode - a model unreliable in one direction on this exact
+    topic is not evidence it's reliable in the other, so both directions
+    are checked here rather than assumed safe.
+    """
+    legs = context.get("legs", [])
+    lowered_text = text.lower()
+    mentions_direct = any(term in lowered_text for term in _DIRECT_TERMS)
+    # "no transfer" is itself a DIRECT claim, not an affirmative mention
+    # of a real transfer - strip it out first so "transfer" as a bare
+    # substring of "no transfer needed" doesn't get counted as "the text
+    # says a transfer IS needed" (a real bug caught writing this check's
+    # own tests).
+    text_without_negated_transfer = lowered_text.replace("no transfer", "")
+    mentions_transfer = any(
+        term in text_without_negated_transfer for term in _TRANSFER_TERMS
+    )
+
+    if len(legs) == 1 and mentions_transfer:
+        return False
+    if len(legs) >= 2 and mentions_direct and not mentions_transfer:
+        return False
+
+    # Every real leg in a "route" context is a real PATH ride (this
+    # module only computes PATH-topology routes - see
+    # path_topology.py's module docstring) - naming any OTHER real
+    # transit agency is inventing a fact not present in the given
+    # context, the same class of bug as a fabricated headsign.
+    other_agencies = ("nj transit", "njt", "mta", "subway", "lirr")
+    if any(agency in lowered_text for agency in other_agencies):
+        return False
+    return True
 
 
 @lru_cache(maxsize=1)
