@@ -17,13 +17,19 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from ..behavior_engine import (
+    direction_choices_for_user,
+    feed_accuracy_for_user,
+    timing_buffers_for_user,
+)
 from ..core.config import settings
 from ..core.database import SessionLocal
 from ..home_office_engine import infer_home_and_office_for_all_users
 from ..jobs.refresh_njt_bus_routes import run as run_njt_bus_routes_refresh
 from ..jobs.send_commute_notifications import send_notifications_for_all_users
-from ..models import ChatMessage
+from ..models import ChatMessage, Trip, User
 from ..preference_engine import recompute_all_preferences
+from ..schedule_engine import usual_departure_hour_for
 from ..transit.njt_bus import NjtBusFeedException
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -110,6 +116,131 @@ async def run_njt_bus_routes_refresh_job(x_internal_secret: str | None = Header(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
     return RunNjtBusRoutesRefreshResponse(trip_id_rows_loaded=trip_id_rows_loaded)
+
+
+class TripDebugRow(BaseModel):
+    id: str
+    start_time: datetime
+    mode: str
+    origin_stop: str
+    route_or_direction: str | None
+    predicted_arrival: datetime | None
+    actual_arrival: datetime | None
+    left_at: datetime | None
+
+
+class FeedAccuracyDebugRow(BaseModel):
+    mode: str
+    origin_stop: str
+    time_slot: int
+    sample_count: int
+    average_error_minutes: float
+
+
+class DirectionChoiceDebugRow(BaseModel):
+    origin_stop: str
+    time_slot: int
+    sample_count: int
+    most_common_route_or_direction: str
+    confidence: float
+
+
+class TimingBufferDebugRow(BaseModel):
+    origin_stop: str
+    time_slot: int
+    sample_count: int
+    average_buffer_minutes: float
+
+
+class UserAiStatusResponse(BaseModel):
+    """Answers "is Behavior/Schedule/Commute AI doing anything for me" with
+    real numbers rather than a guess - every field here is read straight
+    from the same tables/functions the real jobs use, not a re-derived
+    summary that could disagree with what's actually running in
+    production.
+    """
+
+    email: str
+    trip_count: int
+    recent_trips: list[TripDebugRow]
+
+    home_station: str | None
+    home_station_confirmed: bool
+    office_station: str | None
+    fcm_token_registered: bool
+
+    usual_morning_departure_hour: int | None
+    usual_evening_departure_hour: int | None
+
+    feed_accuracy: list[FeedAccuracyDebugRow]
+    direction_choices: list[DirectionChoiceDebugRow]
+    timing_buffers: list[TimingBufferDebugRow]
+
+
+@router.get("/user-ai-status", response_model=UserAiStatusResponse)
+async def user_ai_status(
+    email: str = Query(...),
+    x_internal_secret: str | None = Header(default=None),
+):
+    """Real diagnostic for "is Behavior/Schedule/Commute AI working for
+    me" - reads this one user's actual Trip history and re-runs the exact
+    same behavior_engine/schedule_engine/home_office_engine functions the
+    real scheduled jobs call, so what this reports can't disagree with
+    what's actually happening in production. Read-only, same
+    secret-guarded pattern as the other internal endpoints - exposes one
+    real user's trip history by email, so treat the secret with the same
+    care as any other internal endpoint (this is more sensitive than the
+    chat-transcript debug endpoint, which has no easy way to target one
+    specific person).
+    """
+    _verify_secret(x_internal_secret)
+
+    db = SessionLocal()
+    try:
+        user = db.scalar(select(User).where(User.email == email))
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No user with that email")
+
+        trips = db.scalars(
+            select(Trip)
+            .where(Trip.user_id == user.id)
+            .order_by(Trip.start_time.desc())
+        ).all()
+
+        return UserAiStatusResponse(
+            email=user.email,
+            trip_count=len(trips),
+            recent_trips=[
+                TripDebugRow(
+                    id=str(t.id),
+                    start_time=t.start_time,
+                    mode=t.mode,
+                    origin_stop=t.origin_stop,
+                    route_or_direction=t.route_or_direction,
+                    predicted_arrival=t.predicted_arrival,
+                    actual_arrival=t.actual_arrival,
+                    left_at=t.left_at,
+                )
+                for t in trips[:20]
+            ],
+            home_station=user.home_station,
+            home_station_confirmed=user.home_office_confirmed,
+            office_station=user.office_station,
+            fcm_token_registered=user.fcm_token is not None,
+            usual_morning_departure_hour=usual_departure_hour_for(db, user.id, is_morning=True),
+            usual_evening_departure_hour=usual_departure_hour_for(db, user.id, is_morning=False),
+            feed_accuracy=[
+                FeedAccuracyDebugRow(**vars(r)) for r in feed_accuracy_for_user(db, user.id)
+            ],
+            direction_choices=[
+                DirectionChoiceDebugRow(**vars(r)) for r in direction_choices_for_user(db, user.id)
+            ],
+            timing_buffers=[
+                TimingBufferDebugRow(**vars(r)) for r in timing_buffers_for_user(db, user.id)
+            ],
+        )
+    finally:
+        db.close()
 
 
 class ChatMessageDebugRow(BaseModel):
