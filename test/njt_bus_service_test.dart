@@ -5,7 +5,13 @@ import 'package:http/testing.dart';
 import 'package:commuteos/njt/njt_bus_service.dart';
 import 'package:commuteos/njt/njt_bus_stop.dart';
 
-const _stop = NjtBusStop(stopId: '1941', name: 'The Esplanade', routeNames: ['163', '753']);
+const _stop = NjtBusStop(
+  stopId: '1941',
+  name: 'The Esplanade',
+  routeNames: ['163', '753'],
+  lat: 40.7357,
+  lng: -74.0301,
+);
 
 String _fixture() => '''
 {
@@ -51,6 +57,8 @@ void main() {
       name: 'Journal Square Transportation Center',
       routeNames: ['1', '2', '10'],
       mergedStopIds: ['16792', '16802', '16943'],
+      lat: 40.7325,
+      lng: -74.0629,
     );
     Uri? requestedUri;
     final service = NjtBusService(

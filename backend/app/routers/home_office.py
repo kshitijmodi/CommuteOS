@@ -14,6 +14,17 @@ class HomeOfficeRead(BaseModel):
     home_station: str | None
     office_station: str | None
     confirmed: bool
+    # Which agency each station code belongs to - added 2026-08-12 so the
+    # client can resolve a bare code (e.g. "JSQ") to a real station (with
+    # real lat/lng) for background geofencing (see
+    # lib/behavior/station_geofence_service.dart). Was already tracked on
+    # User (home_mode/office_mode) but never exposed here before - a bare
+    # station code alone is ambiguous across agencies (see User.home_mode's
+    # own docstring), so this endpoint was previously unusable for anything
+    # that needs to know WHICH agency's station data to look the code up
+    # against.
+    home_mode: str | None
+    office_mode: str | None
 
 
 def _to_response(user: User) -> HomeOfficeRead:
@@ -21,6 +32,8 @@ def _to_response(user: User) -> HomeOfficeRead:
         home_station=user.home_station,
         office_station=user.office_station,
         confirmed=user.home_office_confirmed,
+        home_mode=user.home_mode,
+        office_mode=user.office_mode,
     )
 
 

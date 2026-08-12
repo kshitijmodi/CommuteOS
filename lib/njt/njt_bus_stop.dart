@@ -15,6 +15,8 @@ class NjtBusStop implements TransitStation {
     required this.stopId,
     required this.name,
     required this.routeNames,
+    required this.lat,
+    required this.lng,
     this.toward,
     List<String>? mergedStopIds,
   }) : mergedStopIds = mergedStopIds ?? const [];
@@ -55,6 +57,16 @@ class NjtBusStop implements TransitStation {
   /// TransitStation represents" should use [allStopIds] instead of this
   /// field directly, since that also covers the empty/single-bay case.
   final List<String> mergedStopIds;
+
+  /// Real coordinates - added 2026-08-12 for StationGeofenceService. For
+  /// a merged multi-bay terminal, this is the first bay's coordinates
+  /// (see NjtBusStopRepository._isSingleTerminal - every bay is within
+  /// 60m of every other by construction, so any one bay's position is a
+  /// fine stand-in for "the terminal" at geofencing radii).
+  @override
+  final double lat;
+  @override
+  final double lng;
 
   /// Every real stop_id arrivals need to be fetched for - just [stopId]
   /// for an ordinary stop, or the full bay list for a merged terminal.

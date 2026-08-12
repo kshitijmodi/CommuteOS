@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Needed for the (currently stubbed - see push_registration_service.dart)
          server-push commute notifications; the exact-alarm/boot-receiver
          permissions the earlier local-scheduled-notification approach
@@ -21,6 +22,21 @@
          is sent. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Real background geofencing (lib/behavior/station_geofence_service.dart,
+         native_geofence plugin) - detects arrival at a favorited/home/
+         office station even with the app fully closed, so a real Trip
+         gets logged for Behavior AI without requiring the user to open
+         that station's arrivals screen first (see OPEN_QUESTIONS.md's
+         2026-08-12 entry). ACCESS_BACKGROUND_LOCATION is a separate,
+         more sensitive runtime permission from the foreground
+         FINE/COARSE ones above (its own Android Settings screen, not a
+         simple dialog, starting on Android 10+) - only requested after
+         the user has already granted foreground location, per Android's
+         own required flow. RECEIVE_BOOT_COMPLETED lets the plugin
+         re-register geofences after a device reboot (Android drops all
+         geofences on reboot with no built-in survival). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="CommuteOS"
         android:name="${applicationName}"
@@ -53,6 +69,28 @@
         <receiver
             android:name=".ActivityTransitionReceiver"
             android:exported="false" />
+        <!-- native_geofence's own manifest declares both of these
+             exported="true" by default (see its example app) - overridden
+             here to exported="false" as the same defense-in-depth
+             already applied to ActivityTransitionReceiver above: these
+             are only ever triggered via the plugin's own internally-held
+             PendingIntent (geofence transitions) or the system's
+             BOOT_COMPLETED broadcast respectively, never an action string
+             a different installed app could guess and fire directly.
+             Android manifest merging lets the app's own declaration win
+             over the library's. -->
+        <receiver
+            android:name="com.chunkytofustudios.native_geofence.receivers.NativeGeofenceBroadcastReceiver"
+            android:exported="false"
+            tools:node="replace" />
+        <receiver
+            android:name="com.chunkytofustudios.native_geofence.receivers.NativeGeofenceRebootBroadcastReceiver"
+            android:exported="false"
+            tools:node="merge">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

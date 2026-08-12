@@ -12,6 +12,8 @@ class MtaStation implements TransitStation {
     required this.routes,
     required this.northLabel,
     required this.southLabel,
+    required this.lat,
+    required this.lng,
   });
 
   /// The parent GTFS stop_id, e.g. "R20" for 14 St-Union Sq.
@@ -38,6 +40,13 @@ class MtaStation implements TransitStation {
   /// Brooklyn". May be empty for terminal stations with no train that way.
   final String northLabel;
   final String southLabel;
+
+  /// Real coordinates, from MTA's own Stations.csv (GTFS Latitude/GTFS
+  /// Longitude columns) - added 2026-08-12 for StationGeofenceService.
+  @override
+  final double lat;
+  @override
+  final double lng;
 
   String get northStopId => '${gtfsStopId}N';
   String get southStopId => '${gtfsStopId}S';

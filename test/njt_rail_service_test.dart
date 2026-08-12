@@ -5,7 +5,13 @@ import 'package:http/testing.dart';
 import 'package:commuteos/njt/njt_rail_service.dart';
 import 'package:commuteos/njt/njt_rail_station.dart';
 
-const _np = NjtRailStation(code: 'NP', name: 'Newark Penn Station', lines: ['NEC', 'NJCL']);
+const _np = NjtRailStation(
+  code: 'NP',
+  name: 'Newark Penn Station',
+  lines: ['NEC', 'NJCL'],
+  lat: 40.7342,
+  lng: -74.1645,
+);
 
 String _fixture() => '''
 {

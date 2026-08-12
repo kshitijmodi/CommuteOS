@@ -23,6 +23,8 @@ class NjtRailStationRepository {
     final codeCol = header.indexOf('stop_code');
     final nameCol = header.indexOf('stop_name');
     final linesCol = header.indexOf('lines');
+    final latCol = header.indexOf('lat');
+    final lonCol = header.indexOf('lon');
 
     final stations = <NjtRailStation>[];
     for (final row in rows.skip(1)) {
@@ -38,6 +40,8 @@ class NjtRailStationRepository {
               .split('|')
               .where((l) => l.isNotEmpty)
               .toList(),
+          lat: double.tryParse(row[latCol].toString()) ?? 0,
+          lng: double.tryParse(row[lonCol].toString()) ?? 0,
         ),
       );
     }

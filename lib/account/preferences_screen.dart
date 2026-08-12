@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../behavior/station_geofence_service.dart';
 import '../design/components.dart';
 import '../design/theme.dart';
+import '../favorites/favorites_repository.dart';
 import 'home_office_repository.dart';
 import 'preferences_repository.dart';
 import 'push_registration_service.dart';
@@ -21,14 +24,17 @@ class PreferencesScreen extends StatefulWidget {
 
 class _PreferencesScreenState extends State<PreferencesScreen> {
   static const _pushEnabledKey = 'commute_push_enabled';
+  static const _geofencingEnabledKey = 'station_geofencing_enabled';
 
   final _repository = PreferencesRepository();
   final _homeOfficeRepository = HomeOfficeRepository();
   final _pushRegistrationService = PushRegistrationService();
+  final _geofenceService = StationGeofenceService();
   late Future<LearnedPreferences?> _preferencesFuture;
   late Future<HomeOffice?> _homeOfficeFuture;
   bool _isRecomputing = false;
   bool _pushEnabled = false;
+  bool _geofencingEnabled = false;
 
   @override
   void initState() {
@@ -36,6 +42,21 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     _preferencesFuture = _repository.getMyPreferences();
     _homeOfficeFuture = _homeOfficeRepository.getMyHomeOffice();
     _loadPushState();
+    _loadGeofencingState();
+    FavoritesRepository.changes.addListener(_onFavoritesChanged);
+  }
+
+  @override
+  void dispose() {
+    FavoritesRepository.changes.removeListener(_onFavoritesChanged);
+    super.dispose();
+  }
+
+  /// Keeps the geofenced station set current - a favorite removed should
+  /// stop being geofenced, a newly added one should start being. A no-op
+  /// while the feature is off (nothing registered to re-sync).
+  void _onFavoritesChanged() {
+    if (_geofencingEnabled) _geofenceService.syncGeofences();
   }
 
   Future<void> _loadPushState() async {
@@ -43,6 +64,54 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     if (mounted) {
       setState(() => _pushEnabled = prefs.getBool(_pushEnabledKey) ?? false);
     }
+  }
+
+  Future<void> _loadGeofencingState() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() => _geofencingEnabled = prefs.getBool(_geofencingEnabledKey) ?? false);
+    }
+  }
+
+  /// Real background geofencing (see StationGeofenceService's docs) - a
+  /// stronger, more sensitive permission ask than push notifications
+  /// (Android's ACCESS_BACKGROUND_LOCATION has its own dedicated Settings
+  /// screen, not a simple dialog, starting Android 10+), so this is an
+  /// explicit opt-in toggle here rather than something silently started
+  /// at app launch - same posture as the push toggle above, just for a
+  /// bigger ask.
+  Future<void> _toggleGeofencing(bool enabled) async {
+    if (enabled) {
+      final granted = await _requestBackgroundLocationPermission();
+      if (!granted) return; // denied - leave off, never silently retry
+      await _geofenceService.initializeAndSync();
+    } else {
+      await _geofenceService.removeAllGeofences();
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_geofencingEnabledKey, enabled);
+    setState(() => _geofencingEnabled = enabled);
+  }
+
+  /// Android requires foreground location to already be granted before
+  /// ACCESS_BACKGROUND_LOCATION can even be requested - this is Android's
+  /// own required two-step flow, not a choice made here. Returns false
+  /// (never guesses/retries) for any denial at either step.
+  Future<bool> _requestBackgroundLocationPermission() async {
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission != LocationPermission.whileInUse &&
+        permission != LocationPermission.always) {
+      return false;
+    }
+    if (permission == LocationPermission.always) return true;
+
+    // Already whileInUse - the second, separate background-location ask.
+    final upgraded = await Geolocator.requestPermission();
+    return upgraded == LocationPermission.always;
   }
 
   /// Registers (or just remembers "off" locally) for the real proactive
@@ -72,6 +141,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
       _preferencesFuture = Future.value(updated);
       _homeOfficeFuture = Future.value(homeOffice);
     });
+    // A freshly (re-)inferred home/office station should join the
+    // geofenced set immediately, not wait for the next unrelated trigger.
+    if (_geofencingEnabled) _geofenceService.syncGeofences();
   }
 
   Future<void> _confirmHomeOffice() async {
@@ -172,6 +244,45 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                   );
                 },
               ),
+              // Deliberately NOT gated behind homeOffice.confirmed (unlike
+              // the push toggle above) - background geofencing is useful
+              // from favorites alone, and it's actually part of what
+              // helps home/office get inferred in the first place (real
+              // trips logged without needing to open an arrivals screen).
+              AppCard(
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      color: AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Background station tracking',
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Log a trip automatically when you arrive at a '
+                            'favorited (or home/office) station - even with '
+                            'the app closed. Needs background location.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _geofencingEnabled,
+                      onChanged: _toggleGeofencing,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
               const SectionHeader('Learned preferences'),
               AppCard(
                 child: Column(

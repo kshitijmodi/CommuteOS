@@ -11,9 +11,27 @@ import 'package:commuteos/transit/station_picker_sheet.dart';
 import 'package:commuteos/transit/transit_models.dart';
 
 const _path = PathStation(code: 'JSQ', name: 'Journal Square', state: 'NJ', lat: 40.7318097, lng: -74.0628655);
-const _njtRail = NjtRailStation(code: 'JSQ', name: 'Journal Square', lines: ['NEC']);
-const _njtBus1 = NjtBusStop(stopId: '1', name: 'Journal Square', routeNames: ['1']);
-const _njtBus2 = NjtBusStop(stopId: '2', name: 'Journal Square', routeNames: ['2']);
+const _njtRail = NjtRailStation(
+  code: 'JSQ',
+  name: 'Journal Square',
+  lines: ['NEC'],
+  lat: 40.7325,
+  lng: -74.0629,
+);
+const _njtBus1 = NjtBusStop(
+  stopId: '1',
+  name: 'Journal Square',
+  routeNames: ['1'],
+  lat: 40.7325,
+  lng: -74.0629,
+);
+const _njtBus2 = NjtBusStop(
+  stopId: '2',
+  name: 'Journal Square',
+  routeNames: ['2'],
+  lat: 40.7325,
+  lng: -74.0629,
+);
 
 Future<TransitStation?> _showPicker(WidgetTester tester, StationGroup group) async {
   TransitStation? result;
@@ -46,6 +64,8 @@ void main() {
       routes: ['N'],
       northLabel: 'Uptown',
       southLabel: 'Downtown',
+      lat: 40.7395,
+      lng: -73.9887,
     );
     const mta2 = MtaStation(
       gtfsStopId: 'B',
@@ -55,6 +75,8 @@ void main() {
       routes: ['1'],
       northLabel: 'Uptown',
       southLabel: 'Downtown',
+      lat: 40.7442,
+      lng: -73.9958,
     );
     final group = StationGroup(name: '23 St', stations: const [mta1, mta2]);
 

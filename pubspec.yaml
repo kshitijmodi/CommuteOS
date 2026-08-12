@@ -65,6 +65,21 @@ dependencies:
   # now used directly, same convention as fixnum below.
   uuid: ^4.6.0
 
+  # Real background geofencing (lib/behavior/station_geofence_service.dart)
+  # - detects arrival at a favorited/home/office station even with the app
+  # fully closed, feeding Behavior AI a real trip signal without requiring
+  # the user to open that station's arrivals screen first (see
+  # OPEN_QUESTIONS.md's 2026-08-12 entry for why this exists). Verified via
+  # source (not just its README/pub.dev description) to register real
+  # OS-level geofences through Android's GeofencingClient/Geofence API,
+  # delivered to a standalone BroadcastReceiver + WorkManager - the same
+  # architecture already trusted in this codebase for Activity Recognition
+  # (see android/.../ActivityTransitionPlugin.kt) - not a plugin that fakes
+  # geofencing with a battery-draining continuous-polling foreground
+  # service (geofencing_api and geofence_flutter both do exactly that;
+  # ruled out after reading their real source, not their descriptions).
+  native_geofence: ^1.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -61,6 +61,17 @@ abstract class TransitStation {
   /// for a simple MTA local station, or PATH's "To NY"/"To NJ"). A station
   /// with no meaningful direction split (rare) returns a single entry.
   List<TransitDirection> get directions;
+
+  /// Real coordinates - added to the shared interface 2026-08-12 for
+  /// StationGeofenceService (background geofencing needs a real lat/lng
+  /// for every agency, not just PATH, which was the only one exposing
+  /// this before). Every concrete station class's bundled CSV/hardcoded
+  /// data already carries real lat/lng - this only surfaces what was
+  /// already there. Nullable, not because any agency's data is actually
+  /// missing coordinates today, but so a future station type without
+  /// real coordinates isn't forced to fabricate a (0, 0) placeholder.
+  double? get lat;
+  double? get lng;
 }
 
 /// One direction/platform at a station, e.g. "Uptown & The Bronx" for MTA

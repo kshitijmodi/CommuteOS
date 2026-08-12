@@ -27,6 +27,8 @@ class MtaStationRepository {
     final routesCol = header.indexOf('Daytime Routes');
     final northLabelCol = header.indexOf('North Direction Label');
     final southLabelCol = header.indexOf('South Direction Label');
+    final latCol = header.indexOf('GTFS Latitude');
+    final lonCol = header.indexOf('GTFS Longitude');
 
     final stations = <String, MtaStation>{};
     for (final row in rows.skip(1)) {
@@ -49,6 +51,8 @@ class MtaStationRepository {
             .toList(),
         northLabel: row[northLabelCol].toString(),
         southLabel: row[southLabelCol].toString(),
+        lat: double.tryParse(row[latCol].toString()) ?? 0,
+        lng: double.tryParse(row[lonCol].toString()) ?? 0,
       );
     }
 

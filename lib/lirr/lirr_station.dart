@@ -45,6 +45,8 @@ class LirrStation implements TransitStation {
     required this.code,
     required this.name,
     required this.branches,
+    required this.lat,
+    required this.lng,
   });
 
   /// The real-time GTFS-RT feed's numeric stop_id (e.g. "102" for
@@ -73,6 +75,13 @@ class LirrStation implements TransitStation {
   /// is the actual source of truth shown to the user; this list is only
   /// for search/browse route-chip badges.
   final List<String> branches;
+
+  /// Real coordinates, from MTA's static LIRR GTFS feed's stops.txt
+  /// (lat/lon columns) - added 2026-08-12 for StationGeofenceService.
+  @override
+  final double lat;
+  @override
+  final double lng;
 
   @override
   Agency get agency => Agency.lirr;

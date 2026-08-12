@@ -32,7 +32,9 @@ class PathStation implements TransitStation {
   /// `railway=station, network=PATH` nodes, cross-checked against each
   /// station's Wikipedia infobox coordinate) - both agreed within
   /// 5-110m for every station, well within tolerance for this purpose.
+  @override
   final double lat;
+  @override
   final double lng;
 
   @override

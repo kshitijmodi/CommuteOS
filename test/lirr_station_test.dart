@@ -22,6 +22,8 @@ void main() {
         code: 'JAM',
         name: 'Jamaica',
         branches: ['Babylon Branch', 'Montauk Branch'],
+        lat: 40.700329,
+        lng: -73.807903,
       );
 
       expect(station.routes, ['BAB', 'MTK']);
@@ -33,6 +35,8 @@ void main() {
         code: 'JAM',
         name: 'Jamaica',
         branches: ['Babylon Branch'],
+        lat: 40.700329,
+        lng: -73.807903,
       );
 
       expect(station.id, 'JAM');

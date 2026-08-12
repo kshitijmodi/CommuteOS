@@ -19,6 +19,8 @@ const _jamaica = LirrStation(
   code: 'JAM',
   name: 'Jamaica',
   branches: ['Babylon Branch'],
+  lat: 40.700329,
+  lng: -73.807903,
 );
 
 List<int> _buildFeed(

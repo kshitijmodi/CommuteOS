@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../account/trip_logger.dart';
 import '../behavior/departure_detector.dart';
+import '../behavior/trip_log_debounce.dart';
 import '../commute/commute_card.dart';
 import '../commute/commute_repository.dart';
 import '../design/components.dart';
@@ -42,6 +43,7 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
     Agency.lirr => LirrService(),
   };
   final _tripLogger = TripLogger();
+  final _tripLogDebounce = TripLogDebounce();
   final _commuteRepository = CommuteRepository();
   Timer? _timer;
   bool _hasLoggedTrip = false;
@@ -139,21 +141,33 @@ class _ArrivalsScreenState extends State<ArrivalsScreen> {
   /// to." A no-op if logStationView returned null (logged out or the
   /// request failed) - DepartureDetector already treats "no open trip
   /// registered" as "nothing to report against."
+  ///
+  /// Checks TripLogDebounce first (added 2026-08-12 alongside real
+  /// background geofencing - see StationGeofenceService) so opening this
+  /// screen for a station a geofence "enter" event already logged a trip
+  /// for moments ago doesn't double-log the same real visit.
   void _logTripOnce(TransitArrivalsResult result) {
     if (_hasLoggedTrip) return;
     _hasLoggedTrip = true;
 
-    _tripLogger
-        .logStationView(
-          mode: wireAgencyName(widget.station.agency),
-          originStop: widget.station.id,
-          routeOrDirection: soonestRouteOrDirectionForTripLog(widget.station.agency, result),
-        )
-        .then((tripId) {
-          if (tripId != null) {
-            DepartureDetector.instance.registerOpenTrip(tripId);
-          }
-        });
+    final debounceKey = '${widget.station.agency.name}:${widget.station.id}';
+    final now = DateTime.now();
+    _tripLogDebounce.wasRecentlyLogged(debounceKey, now).then((alreadyLogged) {
+      if (alreadyLogged) return;
+
+      _tripLogger
+          .logStationView(
+            mode: wireAgencyName(widget.station.agency),
+            originStop: widget.station.id,
+            routeOrDirection: soonestRouteOrDirectionForTripLog(widget.station.agency, result),
+          )
+          .then((tripId) {
+            if (tripId != null) {
+              _tripLogDebounce.markLogged(debounceKey, now);
+              DepartureDetector.instance.registerOpenTrip(tripId);
+            }
+          });
+    });
   }
 
   /// Fires Commute AI once per screen visit - see CommuteRecommendation's

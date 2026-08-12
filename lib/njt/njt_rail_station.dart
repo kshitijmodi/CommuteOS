@@ -17,6 +17,8 @@ class NjtRailStation implements TransitStation {
     required this.code,
     required this.name,
     required this.lines,
+    required this.lat,
+    required this.lng,
   });
 
   /// NJT's own 2-char station code, e.g. "NP" for Newark Penn Station -
@@ -34,6 +36,13 @@ class NjtRailStation implements TransitStation {
   /// report their own LINECODE per train, which is the actual source of
   /// truth shown to the user; this list is only for search/browse.
   final List<String> lines;
+
+  /// Real coordinates, from NJT's static GTFS rail feed's stops.txt
+  /// (lat/lon columns) - added 2026-08-12 for StationGeofenceService.
+  @override
+  final double lat;
+  @override
+  final double lng;
 
   @override
   Agency get agency => Agency.njtRail;

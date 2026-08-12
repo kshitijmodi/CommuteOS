@@ -10,11 +10,19 @@ class HomeOffice {
     required this.homeStation,
     required this.officeStation,
     required this.confirmed,
+    required this.homeMode,
+    required this.officeMode,
   });
 
   final String? homeStation;
   final String? officeStation;
   final bool confirmed;
+  // Which agency each station code belongs to (e.g. "path", "mta") - a
+  // bare code alone is ambiguous across agencies. Added 2026-08-12 so
+  // StationGeofenceService can resolve these to real stations (with real
+  // lat/lng) without guessing which agency's data to search.
+  final String? homeMode;
+  final String? officeMode;
 
   bool get hasInference => homeStation != null || officeStation != null;
 
@@ -23,6 +31,8 @@ class HomeOffice {
       homeStation: json['home_station'] as String?,
       officeStation: json['office_station'] as String?,
       confirmed: json['confirmed'] as bool,
+      homeMode: json['home_mode'] as String?,
+      officeMode: json['office_mode'] as String?,
     );
   }
 }

@@ -17,6 +17,8 @@ MtaStation _mtaStation({
     routes: routes,
     northLabel: 'Uptown',
     southLabel: 'Downtown',
+    lat: 40.7359,
+    lng: -73.9906,
   );
 }
 

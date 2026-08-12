@@ -100,6 +100,8 @@ class NjtBusStopRepository {
             name: entry.key,
             routeNames: {for (final bay in entry.value) ...bay.$2}.toList()..sort(),
             mergedStopIds: [for (final bay in entry.value) bay.$1],
+            lat: entry.value.first.$3,
+            lng: entry.value.first.$4,
           )
         else
           for (final bay in entry.value)
@@ -108,6 +110,8 @@ class NjtBusStopRepository {
               name: entry.key,
               routeNames: bay.$2..sort(),
               toward: bay.$5.isEmpty ? null : bay.$5,
+              lat: bay.$3,
+              lng: bay.$4,
             ),
     ];
 

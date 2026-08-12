@@ -21,6 +21,8 @@ void main() {
         routes: ['N'],
         northLabel: 'Uptown',
         southLabel: 'Downtown',
+        lat: 40.7359,
+        lng: -73.9906,
       );
       final candidate = RecommendationCandidate(station: station, routeOrDirection: 'N');
       expect(candidate.toJson()['agency'], 'mta');
@@ -33,13 +35,25 @@ void main() {
     });
 
     test('NJT rail station serializes agency as "njt_rail", not "njtRail"', () {
-      const station = NjtRailStation(code: 'NP', name: 'Newark Penn Station', lines: ['NEC']);
+      const station = NjtRailStation(
+        code: 'NP',
+        name: 'Newark Penn Station',
+        lines: ['NEC'],
+        lat: 40.7342,
+        lng: -74.1645,
+      );
       final candidate = RecommendationCandidate(station: station, routeOrDirection: '');
       expect(candidate.toJson()['agency'], 'njt_rail');
     });
 
     test('NJT bus stop serializes agency as "njt_bus", not "njtBus"', () {
-      const station = NjtBusStop(stopId: '1941', name: 'The Esplanade', routeNames: ['163']);
+      const station = NjtBusStop(
+        stopId: '1941',
+        name: 'The Esplanade',
+        routeNames: ['163'],
+        lat: 40.7357,
+        lng: -74.0301,
+      );
       final candidate = RecommendationCandidate(station: station, routeOrDirection: '');
       expect(candidate.toJson()['agency'], 'njt_bus');
     });
