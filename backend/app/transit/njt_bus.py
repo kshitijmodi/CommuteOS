@@ -8,13 +8,35 @@ Real difference from MTA: NJT bus's feed is ONE single feed covering every
 route (not split per line-group like MTA's), and each trip_update's
 `trip.route_id` field is reported EMPTY by NJT - the only way to know
 which bus line an update belongs to is joining its `trip_id` against the
-static GTFS's trips.txt (bundled here as app/data/njt_bus_trip_routes.csv,
-see backend/scripts/build_njt_bus_trip_routes.py for how it's built/why
-it's bundled rather than fetched live).
+static GTFS's trips.txt. A baseline mapping ships bundled as
+app/data/njt_bus_trip_routes.csv (see
+backend/scripts/build_njt_bus_trip_routes.py) purely as a cold-start
+fallback for right after a fresh deploy - it is NOT kept fresh by
+redeploying.
+
+**Real bug found live, 2026-08-11**: NJT reshuffles real bus trip_ids
+completely within days (confirmed: the bundled CSV, built once on
+2026-08-02, had ZERO of its trip_ids match the live feed 9 days later -
+100% miss rate), which is what made stops silently show no arrivals, or
+just the literal word "Bus" instead of a real route number, for users.
+A one-time bundled CSV can't stay correct - `refresh_route_by_trip_id`
+re-downloads NJT's real static GTFS zip (via the same getGTFS endpoint,
+using the same username/password already used for getTripUpdates/
+authenticateUser) and replaces the in-memory mapping directly, called
+daily by app/jobs/refresh_njt_bus_routes.py via the same internal-job+
+GitHub-Actions-cron pattern the commute-notification/preference-recompute
+jobs already use. Deliberately does NOT write the refreshed mapping back
+to app/data/njt_bus_trip_routes.csv on disk - Render's free tier has no
+persistent disk, so a runtime file write there would vanish on the very
+next restart/deploy; keeping the fresh mapping in this module-level dict
+(rebuilt daily, held for the life of the running process) avoids
+depending on filesystem persistence that doesn't exist.
 """
 
 import csv
+import io
 import time
+import zipfile
 from datetime import datetime, timezone
 from importlib import resources
 
@@ -26,6 +48,7 @@ from .models import Arrival, ArrivalsResult
 
 _TOKEN_URL = "https://pcsdata.njtransit.com/api/GTFSG2/authenticateUser"
 _TRIP_UPDATES_URL = "https://pcsdata.njtransit.com/api/GTFSG2/getTripUpdates"
+_GTFS_ZIP_URL = "https://pcsdata.njtransit.com/api/GTFSG2/getGTFS"
 
 # Same 24h-token/rate-limited-minting reasoning as njt_rail.py.
 _TOKEN_LIFETIME_SECONDS = 23 * 60 * 60
@@ -41,6 +64,11 @@ class NjtBusFeedException(Exception):
 
 
 def _load_route_by_trip_id() -> dict[str, str]:
+    """Lazily loads the bundled baseline CSV on first use. This is only
+    ever a cold-start fallback - see refresh_route_by_trip_id for the
+    real, kept-current mapping this gets replaced by once the daily
+    refresh job has run at least once since the process started.
+    """
     global _route_by_trip_id
     if _route_by_trip_id is not None:
         return _route_by_trip_id
@@ -50,6 +78,46 @@ def _load_route_by_trip_id() -> dict[str, str]:
     ) as f:
         _route_by_trip_id = {row["trip_id"]: row["route_short_name"] for row in csv.DictReader(f)}
     return _route_by_trip_id
+
+
+async def refresh_route_by_trip_id() -> int:
+    """Re-downloads NJT's real static bus GTFS zip and replaces the
+    in-memory trip_id -> route_short_name mapping entirely (not merged -
+    a trip_id NJT has since retired should stop resolving, not linger).
+    Returns the number of trip_id rows loaded, for the job/endpoint to
+    report. Raises NjtBusFeedException on any real failure (bad
+    credentials, malformed zip, missing trips.txt/routes.txt) - the
+    caller (the internal job endpoint) surfaces this as a real error
+    rather than silently leaving the previous mapping in place unreported.
+    """
+    global _route_by_trip_id
+
+    token = await _get_token()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(_GTFS_ZIP_URL, data={"token": token})
+    response.raise_for_status()
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            with zf.open("routes.txt") as f:
+                route_name_by_id = {
+                    row["route_id"]: row["route_short_name"]
+                    for row in csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+                }
+            with zf.open("trips.txt") as f:
+                fresh_mapping = {
+                    row["trip_id"]: route_name_by_id[row["route_id"]]
+                    for row in csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+                    if row["route_id"] in route_name_by_id
+                }
+    except (zipfile.BadZipFile, KeyError) as e:
+        raise NjtBusFeedException(f"Failed to parse NJT static bus GTFS zip: {e}") from e
+
+    if not fresh_mapping:
+        raise NjtBusFeedException("NJT static bus GTFS zip parsed but yielded zero trip_id rows")
+
+    _route_by_trip_id = fresh_mapping
+    return len(_route_by_trip_id)
 
 
 async def _get_token() -> str:

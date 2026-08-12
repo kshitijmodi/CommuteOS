@@ -20,9 +20,11 @@ from sqlalchemy import select
 from ..core.config import settings
 from ..core.database import SessionLocal
 from ..home_office_engine import infer_home_and_office_for_all_users
+from ..jobs.refresh_njt_bus_routes import run as run_njt_bus_routes_refresh
 from ..jobs.send_commute_notifications import send_notifications_for_all_users
 from ..models import ChatMessage
 from ..preference_engine import recompute_all_preferences
+from ..transit.njt_bus import NjtBusFeedException
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -34,6 +36,10 @@ class RunCommuteJobResponse(BaseModel):
 class RunPreferenceRecomputeResponse(BaseModel):
     preferences_recomputed: int
     home_office_inferred: int
+
+
+class RunNjtBusRoutesRefreshResponse(BaseModel):
+    trip_id_rows_loaded: int
 
 
 def _verify_secret(x_internal_secret: str | None) -> None:
@@ -80,6 +86,30 @@ async def run_preference_recompute_job(x_internal_secret: str | None = Header(de
         preferences_recomputed=preferences_recomputed,
         home_office_inferred=home_office_inferred,
     )
+
+
+@router.post("/run-njt-bus-routes-refresh-job", response_model=RunNjtBusRoutesRefreshResponse)
+async def run_njt_bus_routes_refresh_job(x_internal_secret: str | None = Header(default=None)):
+    """See jobs/refresh_njt_bus_routes.py - NJT reshuffles real bus
+    trip_ids fast enough that the bundled CSV baseline goes stale within
+    about a week and a half, silently degrading every NJT bus arrival to
+    a "Bus" placeholder (or missing entirely). A real failure here
+    (raised as NjtBusFeedException - bad credentials, malformed feed) is
+    surfaced as a 502 rather than swallowed, unlike the other two jobs
+    above which skip ineligible users silently - there's no per-item
+    partial-success concept here, the mapping either refreshed or it
+    didn't, and a failure means the PREVIOUS in-memory mapping (whatever
+    was loaded at process start or the last successful refresh) is still
+    what's actively serving real requests until this succeeds.
+    """
+    _verify_secret(x_internal_secret)
+
+    try:
+        trip_id_rows_loaded = await run_njt_bus_routes_refresh()
+    except NjtBusFeedException as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    return RunNjtBusRoutesRefreshResponse(trip_id_rows_loaded=trip_id_rows_loaded)
 
 
 class ChatMessageDebugRow(BaseModel):

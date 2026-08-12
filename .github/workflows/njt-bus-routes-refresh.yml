@@ -1,0 +1,40 @@
+name: Trigger NJT bus routes refresh
+
+# Keeps NJT bus's real-time trip_id -> route_short_name mapping fresh
+# (backend/app/transit/njt_bus.py's refresh_route_by_trip_id, backend/app/
+# jobs/refresh_njt_bus_routes.py) - a real bug found live 2026-08-11: NJT
+# reshuffles real bus trip_ids completely within days (confirmed: a
+# mapping built once on 2026-08-02 had 100% of its trip_ids miss the live
+# feed by 2026-08-11), silently degrading NJT bus arrivals to a "Bus"
+# placeholder or nothing at all. Runs daily, not hourly - this data
+# doesn't need to be fresher than once a day to stay well ahead of NJT's
+# actual reshuffle cadence, and there's no per-user timing precision
+# concern here the way there is for commute-notifications.yml (no local
+# time is promised to any user by this job - "when" it runs during the
+# day doesn't matter, only "at least once a day, reliably").
+#
+# No DST-aware dual-cron needed (unlike preference-recompute.yml) since
+# this job's timing has no real-world local-time meaning to preserve -
+# picked 09:13 UTC (an off-the-hour minute, not :00/:30, so this doesn't
+# land on the same instant every other project's "daily at a round UTC
+# hour" cron does).
+on:
+  schedule:
+    - cron: "13 9 * * *"
+  workflow_dispatch: {} # allows a manual run from the Actions tab for testing
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the backend NJT bus routes refresh job
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://commuteos-backend-wbwk.onrender.com/internal/run-njt-bus-routes-refresh-job" \
+            -H "X-Internal-Secret: ${{ secrets.INTERNAL_JOB_SECRET }}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response ($http_code): $body"
+          if [ "$http_code" != "200" ]; then
+            exit 1
+          fi

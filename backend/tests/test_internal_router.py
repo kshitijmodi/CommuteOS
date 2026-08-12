@@ -156,6 +156,83 @@ def test_run_preference_recompute_job_uses_a_real_session_not_the_test_override(
     assert len(captured_dbs) == 2
 
 
+# --- NJT bus routes refresh job (2026-08-11) ---
+# Keeps the trip_id -> route mapping fresh - see
+# transit/njt_bus.py's module docstring for the real bug (NJT reshuffles
+# real bus trip_ids completely within days, silently degrading arrivals
+# to a "Bus" placeholder or nothing at all).
+
+
+def test_run_njt_bus_routes_refresh_job_returns_503_when_secret_not_configured(
+    client, monkeypatch
+):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", None)
+
+    response = client.post(
+        "/internal/run-njt-bus-routes-refresh-job", headers={"X-Internal-Secret": "anything"}
+    )
+
+    assert response.status_code == 503
+
+
+def test_run_njt_bus_routes_refresh_job_rejects_missing_secret(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    response = client.post("/internal/run-njt-bus-routes-refresh-job")
+
+    assert response.status_code == 401
+
+
+def test_run_njt_bus_routes_refresh_job_rejects_wrong_secret(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    response = client.post(
+        "/internal/run-njt-bus-routes-refresh-job", headers={"X-Internal-Secret": "wrong-secret"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_run_njt_bus_routes_refresh_job_succeeds_with_correct_secret(client, monkeypatch):
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    async def fake_refresh():
+        return 35079
+
+    monkeypatch.setattr(
+        "app.routers.internal.run_njt_bus_routes_refresh", fake_refresh
+    )
+
+    response = client.post(
+        "/internal/run-njt-bus-routes-refresh-job", headers={"X-Internal-Secret": "correct-secret"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"trip_id_rows_loaded": 35079}
+
+
+def test_run_njt_bus_routes_refresh_job_surfaces_a_real_feed_failure_as_502(client, monkeypatch):
+    # Unlike the other two jobs (which skip ineligible users silently),
+    # a failure here means the mapping either refreshed or it didn't -
+    # surface it loudly rather than reporting success with nothing done.
+    from app.transit.njt_bus import NjtBusFeedException
+
+    monkeypatch.setattr("app.routers.internal.settings.internal_job_secret", "correct-secret")
+
+    async def fake_refresh():
+        raise NjtBusFeedException("NJT bus authentication failed")
+
+    monkeypatch.setattr(
+        "app.routers.internal.run_njt_bus_routes_refresh", fake_refresh
+    )
+
+    response = client.post(
+        "/internal/run-njt-bus-routes-refresh-job", headers={"X-Internal-Secret": "correct-secret"}
+    )
+
+    assert response.status_code == 502
+
+
 # --- Real chat-transcript debug endpoint (2026-08-10) ---
 # Added for a real, narrow reason: diagnosing a live-reported Chat AI bug
 # needs the actual production transcript, and there's no other way to

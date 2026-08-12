@@ -1,3 +1,6 @@
+import io
+import zipfile
+
 import httpx
 import pytest
 from google.transit import gtfs_realtime_pb2
@@ -191,3 +194,102 @@ async def test_get_arrivals_raises_on_malformed_feed(monkeypatch):
 
     with pytest.raises(njt_bus.NjtBusFeedException):
         await njt_bus.get_arrivals(["12345"])
+
+
+def _build_gtfs_zip(routes: list[tuple[str, str]], trips: list[tuple[str, str]]) -> bytes:
+    """routes: list of (route_id, route_short_name). trips: list of
+    (trip_id, route_id). Mirrors the real columns build_njt_bus_trip_routes.py
+    reads out of NJT's actual static GTFS zip."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        routes_csv = "route_id,route_short_name\n" + "\n".join(
+            f"{rid},{name}" for rid, name in routes
+        )
+        zf.writestr("routes.txt", routes_csv)
+        trips_csv = "trip_id,route_id\n" + "\n".join(f"{tid},{rid}" for tid, rid in trips)
+        zf.writestr("trips.txt", trips_csv)
+    return buf.getvalue()
+
+
+def _mock_handler_with_gtfs_zip(auth_response, zip_bytes):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/authenticateUser"):
+            return httpx.Response(200, json=auth_response)
+        if request.url.path.endswith("/getGTFS"):
+            return httpx.Response(200, content=zip_bytes)
+        raise AssertionError(f"Unexpected request to {request.url}")
+
+    return handler
+
+
+class TestRefreshRouteByTripId:
+    # Real bug found live, 2026-08-11: NJT reshuffles real bus trip_ids
+    # completely within days, so a bundled CSV built once goes 100% stale
+    # fast - this replaces the in-memory mapping directly from a fresh
+    # download rather than relying on the (never re-verified) bundled file.
+
+    @pytest.mark.asyncio
+    async def test_replaces_the_in_memory_mapping_from_a_fresh_download(self, monkeypatch):
+        monkeypatch.setattr(njt_bus.settings, "njt_username", "user")
+        monkeypatch.setattr(njt_bus.settings, "njt_password", "pass")
+        # A stale entry that must NOT survive the refresh - a retired
+        # trip_id lingering would be exactly the same class of bug this
+        # whole fix addresses (stale data silently treated as current).
+        njt_bus._route_by_trip_id = {"stale-trip": "999"}
+
+        zip_bytes = _build_gtfs_zip(
+            routes=[("R1", "409"), ("R2", "1")],
+            trips=[("500", "R1"), ("501", "R2")],
+        )
+        _install_mock_transport(
+            monkeypatch,
+            _mock_handler_with_gtfs_zip({"Authenticated": "True", "UserToken": "abc123"}, zip_bytes),
+        )
+
+        row_count = await njt_bus.refresh_route_by_trip_id()
+
+        assert row_count == 2
+        assert njt_bus._route_by_trip_id == {"500": "409", "501": "1"}
+
+    @pytest.mark.asyncio
+    async def test_a_trip_referencing_an_unknown_route_id_is_skipped_not_crashed_on(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(njt_bus.settings, "njt_username", "user")
+        monkeypatch.setattr(njt_bus.settings, "njt_password", "pass")
+
+        zip_bytes = _build_gtfs_zip(
+            routes=[("R1", "409")],
+            trips=[("500", "R1"), ("501", "R-does-not-exist-in-routes")],
+        )
+        _install_mock_transport(
+            monkeypatch,
+            _mock_handler_with_gtfs_zip({"Authenticated": "True", "UserToken": "abc123"}, zip_bytes),
+        )
+
+        row_count = await njt_bus.refresh_route_by_trip_id()
+
+        assert row_count == 1
+        assert njt_bus._route_by_trip_id == {"500": "409"}
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_zip_raises_and_leaves_the_previous_mapping_untouched(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(njt_bus.settings, "njt_username", "user")
+        monkeypatch.setattr(njt_bus.settings, "njt_password", "pass")
+        njt_bus._route_by_trip_id = {"500": "409"}
+
+        _install_mock_transport(
+            monkeypatch,
+            _mock_handler_with_gtfs_zip(
+                {"Authenticated": "True", "UserToken": "abc123"}, b"not a real zip file"
+            ),
+        )
+
+        with pytest.raises(njt_bus.NjtBusFeedException):
+            await njt_bus.refresh_route_by_trip_id()
+
+        # A failed refresh must not silently wipe out the mapping that
+        # was actively serving real requests before this call.
+        assert njt_bus._route_by_trip_id == {"500": "409"}
