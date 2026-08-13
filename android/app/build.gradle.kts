@@ -38,6 +38,23 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Real crash fixed 2026-08-13, 100% reproducible on every cold
+            // start of a release build - see proguard-rules.pro's own
+            // comment for the full root cause (R8 stripping WorkManager's
+            // Room-generated WorkDatabase_Impl with no keep rule for it,
+            // a real gap only exposed once native_geofence made
+            // WorkManager a load-bearing runtime dependency). This
+            // explicit isMinifyEnabled=true (matching the Flutter Gradle
+            // Plugin's own release default, now made visible rather than
+            // implicit) plus the proguard rules file is the actual fix -
+            // not disabling minification, which would just hide the next
+            // R8-stripped-reflection bug instead of protecting against it.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
