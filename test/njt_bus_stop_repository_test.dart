@@ -12,9 +12,13 @@ void main() {
     });
 
     expect(stops, isNotEmpty);
-    // Real stop confirmed against the live GTFS-RT feed during development.
-    final esplanade = stops.firstWhere((s) => s.stopId == '1941');
-    expect(esplanade.routeNames, contains('163'));
+    // Real stop confirmed against the current bundled CSV (NJT wholesale
+    // renumbered stop_ids since this test was first written - see
+    // OPEN_QUESTIONS.md's 2026-08-13 entry - the old "1941"/Esplanade
+    // example no longer exists under that id, so this was updated to a
+    // real, currently-correct stop rather than left pointing at stale data).
+    final stop = stops.firstWhere((s) => s.stopId == '11092');
+    expect(stop.routeNames, contains('76'));
   });
 
   testWidgets('caches stops after the first load', (tester) async {
@@ -87,28 +91,30 @@ void main() {
       stops = await repository.loadStations();
     });
 
-    final esplanade = stops.firstWhere((s) => s.stopId == '1941');
-    expect(esplanade.mergedStopIds, isEmpty);
-    expect(esplanade.allStopIds, ['1941']);
+    final stop = stops.firstWhere((s) => s.stopId == '11092');
+    expect(stop.mergedStopIds, isEmpty);
+    expect(stop.allStopIds, ['11092']);
   });
 
   testWidgets(
     'does not merge two same-named stops that are actually far apart',
     (tester) async {
-      // Regression test for a real bug reported from the phone: "1ST AVE AT
-      // ALDENE RD" has two stop_ids (14573, 14582) in NJT's static GTFS
-      // sharing this exact name, but they're ~113m apart - almost certainly
-      // opposite-direction stops on either side of the intersection, not
-      // bays of one terminal. The old merge-by-name-alone logic folded them
-      // into one NjtBusStop, so a single arrivals fetch mixed both
-      // directions' route 59 buses into one list - route 59 showed up to 7
-      // times, several already past their arrival time. Confirmed via a
-      // dataset-wide scan that this is not a one-off: 209 of 1,309
-      // same-named stop_id groups are actually >60m apart. Fixed by only
-      // merging same-named stop_ids within a real terminal's radius; stops
-      // that fail that check now load as separate NjtBusStops sharing a
-      // name, so StationGroup's existing collision picker handles them
-      // instead of a silent, incorrect merge.
+      // Regression test for a real bug reported from the phone: two
+      // stop_ids sharing an exact name can be genuinely different physical
+      // stops on opposite sides of an intersection/street rather than bays
+      // of one terminal - the old merge-by-name-alone logic folded them
+      // into one NjtBusStop, mixing both directions' arrivals into one
+      // list. Confirmed via a dataset-wide scan that this is not a
+      // one-off: hundreds of same-named stop_id groups are actually >60m
+      // apart. Fixed by only merging same-named stop_ids within a real
+      // terminal's radius.
+      //
+      // Real example updated 2026-08-13: NJT wholesale renumbered their
+      // bus stop_ids since this test was first written (see
+      // OPEN_QUESTIONS.md's 2026-08-13 entry) - the original "1ST AVE AT
+      // ALDENE RD" (stop_ids 14573/14582) no longer exists under those
+      // ids, so this now uses a real, currently-correct far-apart pair
+      // instead of stale ones.
       final repository = NjtBusStopRepository();
 
       late List stops;
@@ -116,15 +122,17 @@ void main() {
         stops = await repository.loadStations();
       });
 
-      final aldeneEntries = stops.where((s) => s.name == '1ST AVE AT ALDENE RD').toList();
+      final entries = stops
+          .where((s) => s.name == 'PATERSON PLANK RD AT MURRAY HILL PKWY')
+          .toList();
 
-      expect(aldeneEntries, hasLength(2));
-      for (final stop in aldeneEntries) {
+      expect(entries, hasLength(2));
+      for (final stop in entries) {
         expect(stop.mergedStopIds, isEmpty);
       }
       expect(
-        aldeneEntries.map((s) => s.stopId).toSet(),
-        {'14573', '14582'},
+        entries.map((s) => s.stopId).toSet(),
+        {'11108', '11334'},
       );
     },
   );
@@ -132,15 +140,13 @@ void main() {
   testWidgets(
     'unmerged same-named stops get a real "toward" hint so they read as distinguishable',
     (tester) async {
-      // Follow-up to the far-apart-stops fix above: once the two "1ST AVE
-      // AT ALDENE RD" stop_ids stopped being wrongly merged, the station
-      // picker showed two rows with identical route chips and identical
-      // area text ("NJ") - visibly duplicated with no way to tell which
-      // one a rider actually wants. Route 59's real route_long_name is
-      // "Plainfield - Newark" (GTFS's <dir0 terminus> - <dir1 terminus>
-      // convention); stop 14573 serves direction 1 (toward Newark) and
-      // 14582 serves direction 0 (toward Plainfield) - confirmed against
-      // NJT's real static GTFS bus feed.
+      // Follow-up to the far-apart-stops fix above: once a real far-apart
+      // same-named pair stops being wrongly merged, the station picker
+      // showed two rows with identical route chips and identical area
+      // text ("NJ") - visibly duplicated with no way to tell which one a
+      // rider actually wants. Real example updated 2026-08-13 alongside
+      // the far-apart test above, for the same reason (NJT's stop_id
+      // renumbering) - confirmed against the current bundled CSV.
       final repository = NjtBusStopRepository();
 
       late List stops;
@@ -148,12 +154,13 @@ void main() {
         stops = await repository.loadStations();
       });
 
-      final aldeneById = {
-        for (final s in stops.where((s) => s.name == '1ST AVE AT ALDENE RD')) s.stopId: s,
+      final byId = {
+        for (final s in stops.where((s) => s.name == 'PATERSON PLANK RD AT MURRAY HILL PKWY'))
+          s.stopId: s,
       };
 
-      expect(aldeneById['14573']!.toward, 'Newark');
-      expect(aldeneById['14582']!.toward, 'Plainfield');
+      expect(byId['11108']!.toward, 'Ridgewood');
+      expect(byId['11334']!.toward, 'New York');
     },
   );
 
