@@ -263,6 +263,111 @@ async def test_a_real_question_containing_a_closer_word_is_not_swallowed():
     assert not _is_conversation_closer("cool, what's next from Grove Street")
 
 
+class TestVagueNonquestion:
+    # Real bug found live, 2026-08-14: "why" and "lol" (content-free
+    # reactions, not real follow-up questions) fell through to
+    # _last_mentioned_station and got a full, disconnected re-fetch of
+    # the last station's arrivals data repeated back verbatim.
+
+    def test_recognizes_content_free_reactions(self):
+        from app.chat_ai import _is_vague_nonquestion
+
+        assert _is_vague_nonquestion("why")
+        assert _is_vague_nonquestion("lol")
+        assert _is_vague_nonquestion("Why?")
+        assert _is_vague_nonquestion("  LOL  ")
+
+    def test_a_real_followup_question_is_not_swallowed(self):
+        from app.chat_ai import _is_vague_nonquestion
+
+        # Real regression guard: a genuine content-bearing follow-up
+        # must still reach _last_mentioned_station, not get diverted here.
+        assert not _is_vague_nonquestion("what about the other direction")
+        assert not _is_vague_nonquestion("and the next one after that")
+
+
+class TestArrivingNowPhrasing:
+    # Real bug found live, 2026-08-14: a train due right now (minutes_until
+    # rounds to 0.0) was phrased "arriving in 0 minutes" - reads like it
+    # already left, not "it's here."
+
+    def test_an_imminent_arrival_says_arriving_now_not_zero_minutes(self):
+        from app.chat_ai import _template_answer
+
+        context = {
+            "kind": "arrivals",
+            "station": "Journal Square",
+            "agency": "path",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 0.0, "headsign": "33rd Street"}],
+        }
+
+        text = _template_answer(context)
+
+        assert "arriving now" in text.lower()
+        assert "0 min" not in text
+        assert "0.0 min" not in text
+
+    def test_a_real_future_arrival_still_shows_the_real_minute_count(self):
+        from app.chat_ai import _template_answer
+
+        context = {
+            "kind": "arrivals",
+            "station": "Journal Square",
+            "agency": "path",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 5.2, "headsign": "33rd Street"}],
+        }
+
+        text = _template_answer(context)
+
+        assert "5.2 min" in text
+        assert "arriving now" not in text.lower()
+
+    def test_format_wait_says_arriving_now_for_an_imminent_leg(self):
+        from app.chat_ai import _format_wait
+
+        assert _format_wait(0.0) == "the next one is arriving now"
+        assert _format_wait(0.4) == "the next one is arriving now"
+
+    def test_format_wait_still_shows_a_real_minute_count_otherwise(self):
+        from app.chat_ai import _format_wait
+
+        assert _format_wait(3.5) == "the next one is in about 3.5 min"
+
+    def test_format_wait_none_is_still_handled_honestly(self):
+        from app.chat_ai import _format_wait
+
+        assert _format_wait(None) == "no live arrival time available for this leg right now"
+
+
+@pytest.mark.asyncio
+async def test_a_vague_nonquestion_gets_an_honest_nudge_not_a_disconnected_reanswer(db_session):
+    # End-to-end proof of the real bug: after a real station is discussed,
+    # "lol" must not re-answer with that station's arrivals again.
+    import uuid
+
+    from app.models import ChatMessage, ChatSession
+
+    session_id = uuid.uuid4()
+    db_session.add(ChatSession(id=session_id))
+    db_session.commit()
+    db_session.add(
+        ChatMessage(
+            session_id=session_id,
+            role="assistant",
+            content="The next PATH train from Journal Square is to 33rd Street, arriving in 5 min.",
+            station_agency="path",
+            station_code="JSQ",
+        )
+    )
+    db_session.commit()
+
+    result = await answer_question("lol", db=db_session, session_id=session_id)
+
+    assert result.station is None
+    assert "33rd" not in result.text
+    assert "journal square" not in result.text.lower()
+
+
 @pytest.mark.asyncio
 async def test_arrivals_context_carries_real_headsigns_when_the_feed_reports_them(monkeypatch):
     # Real bug found live: PATH's feed reports a real per-arrival

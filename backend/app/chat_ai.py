@@ -120,13 +120,25 @@ Answer using ONLY these numbers and headsigns - if asked about "the \
 other direction" and this arrivals list mixes multiple real headsigns \
 together, describe them as they actually are grouped here; do not \
 assume there are exactly two directions or invent a distinction the data \
-doesn't show.
+doesn't show. A "minutes_until" under 1 means the arrival is due RIGHT \
+NOW - say "arriving now," never "in 0 minutes" or "in 0.0 minutes," \
+which reads as if it already left. When multiple arrivals share the \
+same real headsign, group them into ONE clause with all their times \
+listed together (e.g. "trains to World Trade Center in 5, 8, and 12 \
+minutes") - never repeat the same headsign in two separate clauses in \
+one answer.
 - {"kind": "no_match"} - no known station matched the question. Ask the \
 user to clarify which station they mean. Do NOT suggest, name, or list \
 ANY specific example station names (e.g. do not say "such as X or Y") - \
 you have no real list to draw examples from here, and naming any \
 station you were not given is inventing one. A plain, generic request \
 to clarify is the entire correct answer.
+- {"kind": "vague_followup"} - the user's message is a content-free \
+reaction or interjection ("why," "lol," "what") rather than a real \
+question, and there is no real data or station involved. Ask a plain, \
+friendly, generic question about what they'd like to know - do NOT \
+answer as if they asked about any station (there is none in this \
+context), and do NOT repeat or reference any earlier answer.
 - {"kind": "ambiguous", "options": [...]} - more than one station could \
 match, each with "name", "agency", and an optional "toward" (a real \
 direction hint, e.g. "Kearny" - two options can share the exact same \
@@ -246,6 +258,8 @@ def _template_answer(context: dict) -> str:
         )
     if kind == "no_match":
         return "I couldn't find a station matching that - could you tell me the station name?"
+    if kind == "vague_followup":
+        return "Not sure what you're asking - what would you like to know about your commute?"
     if kind == "ambiguous":
         # Append the real "toward X" hint when one exists, so two options
         # that would otherwise render identically (e.g. two separate real
@@ -295,16 +309,33 @@ def _template_answer(context: dict) -> str:
         return f"No upcoming arrivals found for {station} right now."
     soonest = arrivals[0]
     headsign = f" toward {soonest['headsign']}" if soonest.get("headsign") else ""
-    return f"The next arrival at {station}{headsign} is {soonest['route_label']} in about {soonest['minutes_until']} min."
+    when = _format_minutes_until(soonest["minutes_until"])
+    return f"The next arrival at {station}{headsign} is {soonest['route_label']} {when}."
+
+
+def _format_minutes_until(minutes_until: float) -> str:
+    """A real arrival due right now rounds to 0.0 (or even a tiny
+    negative value from clock skew between fetch and phrasing) - a real
+    bug found live, 2026-08-14: the template/LLM said "arriving in 0
+    minutes," which reads like the train already left rather than "it's
+    here." Anything under a minute reads as "now," matching how a human
+    would actually describe it.
+    """
+    if minutes_until < 1:
+        return "arriving now"
+    return f"in about {minutes_until} min"
 
 
 def _format_wait(wait_minutes: float | None) -> str:
     """Never prints "None min" - a leg with no live arrivals right now
     (real, if rare - PATH's feed occasionally has a gap) says so plainly
-    instead of a fabricated/blank number.
+    instead of a fabricated/blank number. Same "0 min reads as arriving
+    now, not 0" fix as _format_minutes_until.
     """
     if wait_minutes is None:
         return "no live arrival time available for this leg right now"
+    if wait_minutes < 1:
+        return "the next one is arriving now"
     return f"the next one is in about {wait_minutes} min"
 
 
@@ -498,6 +529,34 @@ _CLOSING_REMARKS = {
     "thanks!", "thank you!", "cool", "cool thanks", "great thanks",
     "got it", "alright", "alright thanks", "k", "kk", "nice", "perfect",
 }
+
+# Real bug found live, 2026-08-14: "why" and "lol" (neither a real
+# question naming a station, nor a genuine content-bearing follow-up
+# like "what about the other one") were falling through to
+# _last_mentioned_station and getting a full re-fetched arrivals answer
+# for the last station discussed - a real disconnect from what the user
+# actually said ("lol" is not "tell me the arrivals again"). Distinct
+# from _CLOSING_REMARKS above, which are genuine closing acknowledgments
+# that get a friendly sign-off; these are content-free reactions/
+# interjections that deserve an honest "what would you like to know"
+# nudge instead of silently re-answering unrelated data. Deliberately a
+# narrow, exact-match set (same reasoning as _CLOSING_REMARKS) rather
+# than a broad heuristic - a real vague-but-substantive follow-up like
+# "and the other direction" or "what about now" must still reach
+# _last_mentioned_station, not get swallowed here.
+_VAGUE_NONQUESTIONS = {
+    "why", "why not", "lol", "lmao", "haha", "hm", "hmm", "huh",
+    "what", "wat", "really", "seriously", "no", "yes", "wait",
+}
+
+
+def _is_vague_nonquestion(question: str) -> bool:
+    """See _VAGUE_NONQUESTIONS's docstring - checked in answer_question
+    only for a station-less question (find_stations already came back
+    empty), right before _last_mentioned_station would otherwise treat
+    it as an implicit follow-up about the last station discussed."""
+    normalized = re.sub(r"[^a-z ]", "", question.lower()).strip()
+    return normalized in _VAGUE_NONQUESTIONS
 
 
 def _is_conversation_closer(question: str) -> bool:
@@ -1264,6 +1323,21 @@ async def answer_question(
     matches = find_stations(question)
 
     if not matches:
+        # A content-free reaction/interjection ("why", "lol") is neither
+        # a real follow-up (which should still reach _last_mentioned_
+        # station below, e.g. "what about the other one") nor a genuine
+        # attempt to name a station - checked here, before the fallback
+        # chain, so it gets an honest "what would you like to know" nudge
+        # instead of a full, disconnected re-fetch of the last station's
+        # data (a real bug found live, 2026-08-14: "lol" got a verbatim
+        # repeat of the prior arrivals answer).
+        if _is_vague_nonquestion(question):
+            context = {"kind": "vague_followup"}
+            text = _ask_llm(question, context, history) or _template_answer(context)
+            answer = ChatAnswer(text=text, station=None)
+            _persist_turn(db, session_id, user_id, question, answer)
+            return answer
+
         # No station name in THIS question. Resolution order, each tier
         # only real data, never a guess: (1) a real prior turn in this
         # same conversation may resolve it (e.g. "what time's the next
