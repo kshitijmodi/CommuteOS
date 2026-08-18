@@ -398,7 +398,7 @@ def _answer_is_faithful(text: str, context: dict) -> bool:
     """
     kind = context.get("kind")
     if kind == "arrivals":
-        return _headsigns_are_faithful(text, context)
+        return _headsigns_are_faithful(text, context) and _imminent_arrivals_say_now(text, context)
     if kind == "route":
         return _route_leg_count_is_faithful(text, context)
     if kind == "next_station":
@@ -436,6 +436,41 @@ def _headsigns_are_faithful(text: str, context: dict) -> bool:
         if (normalized_name := normalize(name)) not in allowed_names
     }
     return not any(contains_whole(lowered_text, name) for name in other_real_names if name)
+
+
+# Matches a bare "0"/"0.0" naming a minute count, in either shape found
+# live: directly adjacent ("0 minutes") or as the first of a comma/"and"
+# -separated list of minute counts ("0 and 4 minutes", "0, 2, and 3
+# minutes") - the number itself doesn't need to be immediately followed
+# by the word "minutes" as long as the whole clause is.
+_ZERO_MINUTES_PATTERN = re.compile(
+    r"\b0(\.0)?\b(?=(?:\s*,?\s*(?:and\s+)?\d+(\.\d+)?)*\s*min(ute)?s?\b)",
+    re.IGNORECASE,
+)
+
+
+def _imminent_arrivals_say_now(text: str, context: dict) -> bool:
+    """True unless [text] contains a literal "0 minutes"/"0 min" for an
+    arrival context with a real arrival due right now - a real bug found
+    live, 2026-08-14: the system prompt tells the LLM to say "arriving
+    now" instead of "in 0 minutes" (see _SYSTEM_PROMPT), but under real
+    production load, a multi-arrival list ("trains to X in 0 and 4
+    minutes") still leaked the literal "0" through even when a single-
+    arrival answer correctly avoided it - the same "a prompt rule alone
+    isn't reliably followed" lesson as _headsigns_are_faithful and
+    _route_leg_count_is_faithful, just for this specific phrasing
+    pattern. Only checked when a real arrival in context actually has
+    minutes_until < 1 - a text mentioning "0 minutes" when nothing in
+    the real data is that imminent would be a different, already-caught
+    class of fabrication (a real number not present in the data).
+    """
+    has_real_imminent_arrival = any(
+        a.get("minutes_until") is not None and a["minutes_until"] < 1
+        for a in context.get("arrivals", [])
+    )
+    if not has_real_imminent_arrival:
+        return True
+    return _ZERO_MINUTES_PATTERN.search(text) is None
 
 
 _TRANSFER_TERMS = ("transfer", "change trains", "switch trains")

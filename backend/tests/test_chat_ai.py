@@ -339,6 +339,125 @@ class TestArrivingNowPhrasing:
         assert _format_wait(None) == "no live arrival time available for this leg right now"
 
 
+class TestImminentArrivalsSayNow:
+    # Real bug found live, 2026-08-14, discovered while re-verifying the
+    # ArrivingNowPhrasing fix above against production: the system-prompt
+    # rule telling the LLM to say "arriving now" instead of "0 minutes"
+    # held for a single-arrival answer but still leaked a bare "0" through
+    # in a real multi-arrival list ("trains to X in 0 and 4 minutes") -
+    # the same "a prompt rule alone isn't reliable" lesson as
+    # _headsigns_are_faithful/_route_leg_count_is_faithful, so this is a
+    # real code-level check, not just another prompt tweak.
+
+    def test_a_literal_zero_minutes_for_a_real_imminent_arrival_is_rejected(self):
+        from app.chat_ai import _imminent_arrivals_say_now
+
+        context = {
+            "kind": "arrivals",
+            "arrivals": [
+                {"route_label": "PATH", "minutes_until": 0.0, "headsign": "33rd Street"},
+                {"route_label": "PATH", "minutes_until": 4.0, "headsign": "33rd Street"},
+            ],
+        }
+        text = "Trains to 33rd Street in 0 and 4 minutes."
+
+        assert _imminent_arrivals_say_now(text, context) is False
+
+    def test_saying_arriving_now_for_a_real_imminent_arrival_is_accepted(self):
+        from app.chat_ai import _imminent_arrivals_say_now
+
+        context = {
+            "kind": "arrivals",
+            "arrivals": [
+                {"route_label": "PATH", "minutes_until": 0.0, "headsign": "33rd Street"},
+                {"route_label": "PATH", "minutes_until": 4.0, "headsign": "33rd Street"},
+            ],
+        }
+        text = "A train to 33rd Street is arriving now, and another in 4 minutes."
+
+        assert _imminent_arrivals_say_now(text, context) is True
+
+    def test_no_real_imminent_arrival_means_zero_minutes_is_a_non_issue(self):
+        # If nothing in the real data is actually due now, this check has
+        # nothing to say either way - a stray "0" in that case would be a
+        # different, already-caught class of fabrication (a number not
+        # present in the real data), not this check's job.
+        from app.chat_ai import _imminent_arrivals_say_now
+
+        context = {
+            "kind": "arrivals",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 5.0, "headsign": "33rd Street"}],
+        }
+        text = "A train to 33rd Street in 5 minutes."
+
+        assert _imminent_arrivals_say_now(text, context) is True
+
+    def test_0_point_0_minutes_is_also_caught(self):
+        from app.chat_ai import _imminent_arrivals_say_now
+
+        context = {
+            "kind": "arrivals",
+            "arrivals": [{"route_label": "PATH", "minutes_until": 0.0, "headsign": "33rd Street"}],
+        }
+        text = "A train to 33rd Street in 0.0 minutes."
+
+        assert _imminent_arrivals_say_now(text, context) is False
+
+
+@pytest.mark.asyncio
+async def test_a_hallucinated_zero_minutes_answer_is_discarded_for_the_real_template_answer(
+    monkeypatch, db_session
+):
+    # Real end-to-end proof, mocking at the actual OpenAI client call so
+    # the real _imminent_arrivals_say_now check inside _ask_llm genuinely
+    # runs: even when the LLM says "0 minutes" for a real imminent
+    # arrival, the final answer never contains it. Needs a genuinely
+    # imminent real arrival (unlike direction_aware_path_mock's fixed
+    # 5-minute one) or this check would have nothing to catch.
+    import app.chat_ai as chat_ai
+
+    now = datetime.now(timezone.utc)
+
+    async def fake_imminent_path(station_code, direction):
+        return ArrivalsResult(
+            arrivals=[
+                Arrival(route_label="PATH", arrival_time=now, headsign="World Trade Center"),
+                Arrival(route_label="PATH", arrival_time=now + timedelta(minutes=4), headsign="World Trade Center"),
+            ],
+            is_live=True,
+        )
+
+    monkeypatch.setattr("app.chat_ai.path.get_arrivals", fake_imminent_path)
+    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
+
+    class _FakeMessage:
+        content = "Trains to World Trade Center in 0 and 4 minutes."
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            return _FakeResponse()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        def __init__(self, *args, **kwargs):
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+
+    result = await answer_question("what's arriving at Hoboken")
+
+    assert "0 min" not in result.text
+    assert "0.0 min" not in result.text
+
+
 @pytest.mark.asyncio
 async def test_a_vague_nonquestion_gets_an_honest_nudge_not_a_disconnected_reanswer(db_session):
     # End-to-end proof of the real bug: after a real station is discussed,
