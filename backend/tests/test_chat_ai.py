@@ -9,6 +9,38 @@ from app.models import ChatMessage, ChatSession, Trip, User
 from app.transit.models import Arrival, ArrivalsResult
 
 
+def _fake_anthropic_client(text: str):
+    """A fake Anthropic client whose .messages.create() always returns
+    [text] as a single real "text" content block - matches the real
+    SDK's response.content shape (a list of blocks, checked via
+    block.type == "text" in llm_phrasing._extract_text/chat_ai._ask_llm)
+    closely enough for these end-to-end tests, which only need the real
+    _ask_llm/_answer_is_faithful code path to run against real text,
+    not a byte-perfect SDK response. Shared here rather than duplicated
+    in every end-to-end hallucination test below.
+    """
+
+    class _FakeTextBlock:
+        type = "text"
+
+        def __init__(self, text):
+            self.text = text
+
+    class _FakeMessage:
+        def __init__(self, text):
+            self.content = [_FakeTextBlock(text)]
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            return _FakeMessage(text)
+
+    class _FakeAnthropic:
+        def __init__(self, *args, **kwargs):
+            self.messages = _FakeMessages()
+
+    return _FakeAnthropic
+
+
 def _make_user(db_session, email="chatpersonal@example.com"):
     user = User(email=email, hashed_password=hash_password("hunter2"))
     db_session.add(user)
@@ -20,9 +52,9 @@ def _make_user(db_session, email="chatpersonal@example.com"):
 @pytest.fixture(autouse=True)
 def no_llm_key(monkeypatch):
     # Deterministic-template path only, matching test_llm_phrasing.py's
-    # pattern - keeps assertions stable regardless of a real Groq key
-    # being configured on this machine.
-    monkeypatch.setattr("app.chat_ai.settings.groq_api_key", None)
+    # pattern - keeps assertions stable regardless of a real Anthropic
+    # key being configured on this machine.
+    monkeypatch.setattr("app.chat_ai.settings.anthropic_api_key", None)
 
 
 @pytest.fixture(autouse=True)
@@ -408,12 +440,12 @@ class TestImminentArrivalsSayNow:
 async def test_a_hallucinated_zero_minutes_answer_is_discarded_for_the_real_template_answer(
     monkeypatch, db_session
 ):
-    # Real end-to-end proof, mocking at the actual OpenAI client call so
-    # the real _imminent_arrivals_say_now check inside _ask_llm genuinely
-    # runs: even when the LLM says "0 minutes" for a real imminent
-    # arrival, the final answer never contains it. Needs a genuinely
-    # imminent real arrival (unlike direction_aware_path_mock's fixed
-    # 5-minute one) or this check would have nothing to catch.
+    # Real end-to-end proof, mocking at the actual Anthropic client call
+    # so the real _imminent_arrivals_say_now check inside _ask_llm
+    # genuinely runs: even when the LLM says "0 minutes" for a real
+    # imminent arrival, the final answer never contains it. Needs a
+    # genuinely imminent real arrival (unlike direction_aware_path_mock's
+    # fixed 5-minute one) or this check would have nothing to catch.
     import app.chat_ai as chat_ai
 
     now = datetime.now(timezone.utc)
@@ -428,29 +460,10 @@ async def test_a_hallucinated_zero_minutes_answer_is_discarded_for_the_real_temp
         )
 
     monkeypatch.setattr("app.chat_ai.path.get_arrivals", fake_imminent_path)
-    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
-
-    class _FakeMessage:
-        content = "Trains to World Trade Center in 0 and 4 minutes."
-
-    class _FakeChoice:
-        message = _FakeMessage()
-
-    class _FakeResponse:
-        choices = [_FakeChoice()]
-
-    class _FakeCompletions:
-        def create(self, **kwargs):
-            return _FakeResponse()
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        def __init__(self, *args, **kwargs):
-            self.chat = _FakeChat()
-
-    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(chat_ai.settings, "anthropic_api_key", "fake-key-for-this-test")
+    monkeypatch.setattr(
+        chat_ai, "Anthropic", _fake_anthropic_client("Trains to World Trade Center in 0 and 4 minutes.")
+    )
 
     result = await answer_question("what's arriving at Hoboken")
 
@@ -1169,35 +1182,18 @@ class TestRouteLegCountIsFaithful:
 async def test_a_hallucinated_route_transfer_is_discarded_for_the_real_template_answer(
     monkeypatch, db_session
 ):
-    # Real end-to-end proof, mocking at the actual OpenAI client call so
-    # the real fidelity check inside _ask_llm genuinely runs: even when
-    # the LLM invents a transfer for a real direct route, the final
+    # Real end-to-end proof, mocking at the actual Anthropic client call
+    # so the real fidelity check inside _ask_llm genuinely runs: even
+    # when the LLM invents a transfer for a real direct route, the final
     # answer never contains it.
     import app.chat_ai as chat_ai
 
-    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
-
-    class _FakeMessage:
-        content = "You need to transfer at Exchange Place to get from Grove Street to Newport."
-
-    class _FakeChoice:
-        message = _FakeMessage()
-
-    class _FakeResponse:
-        choices = [_FakeChoice()]
-
-    class _FakeCompletions:
-        def create(self, **kwargs):
-            return _FakeResponse()
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        def __init__(self, *args, **kwargs):
-            self.chat = _FakeChat()
-
-    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(chat_ai.settings, "anthropic_api_key", "fake-key-for-this-test")
+    monkeypatch.setattr(
+        chat_ai,
+        "Anthropic",
+        _fake_anthropic_client("You need to transfer at Exchange Place to get from Grove Street to Newport."),
+    )
 
     result = await answer_question("how do I get from Grove Street to Newport")
 
@@ -1264,39 +1260,22 @@ class TestNextStationAnswerIsComplete:
 async def test_an_incomplete_next_station_answer_is_discarded_for_the_real_template_answer(
     monkeypatch, db_session
 ):
-    # Real end-to-end proof, mocking at the actual OpenAI client call so
-    # the real completeness check inside _ask_llm genuinely runs: even
+    # Real end-to-end proof, mocking at the actual Anthropic client call
+    # so the real completeness check inside _ask_llm genuinely runs: even
     # when the LLM's answer silently drops a real adjacent station, the
     # final answer always names every real one (via the deterministic
     # template, built by iterating the real adjacency list directly).
     import app.chat_ai as chat_ai
 
-    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
-
-    class _FakeMessage:
-        content = (
+    monkeypatch.setattr(chat_ai.settings, "anthropic_api_key", "fake-key-for-this-test")
+    monkeypatch.setattr(
+        chat_ai,
+        "Anthropic",
+        _fake_anthropic_client(
             "After Grove Street, the next stop is Exchange Place or "
             "Journal Square, depending on which direction you're headed."
-        )
-
-    class _FakeChoice:
-        message = _FakeMessage()
-
-    class _FakeResponse:
-        choices = [_FakeChoice()]
-
-    class _FakeCompletions:
-        def create(self, **kwargs):
-            return _FakeResponse()
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        def __init__(self, *args, **kwargs):
-            self.chat = _FakeChat()
-
-    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+        ),
+    )
 
     result = await answer_question("what is the next station after grove street")
 
@@ -1307,37 +1286,18 @@ async def test_an_incomplete_next_station_answer_is_discarded_for_the_real_templ
 async def test_a_hallucinated_headsign_is_discarded_for_the_real_template_answer(
     monkeypatch, direction_aware_path_mock, db_session
 ):
-    # Real end-to-end proof, mocking at the actual OpenAI client call (not
-    # _ask_llm itself) so the real fidelity check inside _ask_llm
+    # Real end-to-end proof, mocking at the actual Anthropic client call
+    # (not _ask_llm itself) so the real fidelity check inside _ask_llm
     # genuinely runs: even when the LLM returns text that invents a fake
     # destination, the final answer never contains it - the real
     # deterministic template (built directly from real data) is used
     # instead, silently and automatically.
     import app.chat_ai as chat_ai
 
-    monkeypatch.setattr(chat_ai.settings, "groq_api_key", "fake-key-for-this-test")
-
-    class _FakeMessage:
-        content = "The next PATH train from Grove Street to Harrison is in 5 minutes."
-
-    class _FakeChoice:
-        message = _FakeMessage()
-
-    class _FakeResponse:
-        choices = [_FakeChoice()]
-
-    class _FakeCompletions:
-        def create(self, **kwargs):
-            return _FakeResponse()
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        def __init__(self, *args, **kwargs):
-            self.chat = _FakeChat()
-
-    monkeypatch.setattr(chat_ai, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(chat_ai.settings, "anthropic_api_key", "fake-key-for-this-test")
+    monkeypatch.setattr(
+        chat_ai, "Anthropic", _fake_anthropic_client("The next PATH train from Grove Street to Harrison is in 5 minutes.")
+    )
 
     session_id = uuid.uuid4()
     await answer_question("what's next from Grove Street", db=db_session, session_id=session_id)

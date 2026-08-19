@@ -59,7 +59,7 @@ import uuid
 from dataclasses import dataclass
 from functools import lru_cache
 
-from openai import OpenAI, OpenAIError
+from anthropic import Anthropic, AnthropicError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -349,28 +349,41 @@ def _ask_llm(
     default, and every call site before conversation memory existed)
     means no history - behaves exactly as before.
     """
-    if not settings.groq_api_key:
+    if not settings.anthropic_api_key:
         return None
 
-    client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+    client = Anthropic(api_key=settings.anthropic_api_key)
     payload = {"question": question, "context": context}
 
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-    for turn in history or []:
-        role = "assistant" if turn.role == "assistant" else "user"
-        messages.append({"role": role, "content": turn.content})
+    # Anthropic's Messages API takes the system prompt as its own
+    # top-level param, not a "system"-role message in the list - and the
+    # message list itself must start with a "user" turn (no leading
+    # "assistant" message), unlike OpenAI's shape this used to follow.
+    messages = [
+        {"role": "assistant" if turn.role == "assistant" else "user", "content": turn.content}
+        for turn in (history or [])
+    ]
     messages.append({"role": "user", "content": str(payload)})
 
     try:
-        response = client.chat.completions.create(
-            model=settings.groq_model,
-            temperature=0.2,
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            system=_SYSTEM_PROMPT,
             max_tokens=200,
             messages=messages,
+            # Deliberately no temperature param - claude-sonnet-5 doesn't
+            # accept it (a real gotcha hit switching providers, not an
+            # oversight - see the config.py comment on this switch).
         )
-        text = response.choices[0].message.content
+        # Sonnet 5 can return a "thinking" block ahead of the real "text"
+        # block in response.content (a list, not a single message the
+        # way OpenAI's response shape was) - find the text block
+        # explicitly rather than assuming content[0] is it.
+        text = next(
+            (block.text for block in response.content if block.type == "text"), None
+        )
         text = text.strip() if text else None
-    except OpenAIError:
+    except AnthropicError:
         return None
 
     if text is not None and not _answer_is_faithful(text, context):

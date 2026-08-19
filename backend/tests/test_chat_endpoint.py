@@ -16,7 +16,7 @@ def _signup_and_login(client, email="chatendpoint@example.com", password="hunter
 
 @pytest.fixture(autouse=True)
 def no_llm_key(monkeypatch):
-    monkeypatch.setattr("app.chat_ai.settings.groq_api_key", None)
+    monkeypatch.setattr("app.chat_ai.settings.anthropic_api_key", None)
 
 
 @pytest.fixture(autouse=True)

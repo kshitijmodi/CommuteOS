@@ -29,7 +29,7 @@ def _route(mode="path", label="PATH", confidence=0.9, minutes_from_now=15):
 
 
 def test_falls_back_to_template_when_no_api_key(monkeypatch):
-    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    monkeypatch.setattr("app.llm_phrasing.settings.anthropic_api_key", None)
 
     result = phrase_recommendation(_route())
 
@@ -48,7 +48,7 @@ def test_template_is_confident_for_high_confidence():
 
 
 def test_comparison_falls_back_to_plain_phrasing_with_no_alternatives(monkeypatch):
-    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    monkeypatch.setattr("app.llm_phrasing.settings.anthropic_api_key", None)
 
     result = phrase_comparison(_route(), [])
 
@@ -57,7 +57,7 @@ def test_comparison_falls_back_to_plain_phrasing_with_no_alternatives(monkeypatc
 
 
 def test_comparison_falls_back_to_template_when_no_api_key(monkeypatch):
-    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    monkeypatch.setattr("app.llm_phrasing.settings.anthropic_api_key", None)
 
     winner = _route(mode="mta", label="N train", minutes_from_now=10)
     runner_up = _route(mode="path", label="PATH", minutes_from_now=15)
@@ -131,7 +131,7 @@ def test_schedule_phrase_no_live_data_with_no_substitute_either():
 
 
 def test_phrase_schedule_notification_falls_back_to_template_when_no_api_key(monkeypatch):
-    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    monkeypatch.setattr("app.llm_phrasing.settings.anthropic_api_key", None)
     assessment = DisruptionAssessment(severity=DisruptionSeverity.ON_TIME, delay_minutes=1.0)
     live = datetime(2026, 1, 1, 8, 10, tzinfo=timezone.utc)
 
@@ -179,7 +179,7 @@ def test_commute_template_cites_reliability_when_it_differs_but_is_slower():
 
 
 def test_phrase_commute_recommendation_falls_back_to_template_when_no_api_key(monkeypatch):
-    monkeypatch.setattr("app.llm_phrasing.settings.groq_api_key", None)
+    monkeypatch.setattr("app.llm_phrasing.settings.anthropic_api_key", None)
     winner = _route(mode="mta", label="N", minutes_from_now=5)
     recommendation = CommuteRecommendation(
         winner=winner, alternatives=[], usual_route_or_direction=None, differs_from_usual=False

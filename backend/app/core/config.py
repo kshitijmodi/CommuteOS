@@ -14,11 +14,23 @@ class Settings(BaseSettings):
     secret_key: str = "dev-only-insecure-secret-change-me"
     access_token_expire_minutes: int = 60 * 24 * 7  # 1 week
 
-    # Phase 3 LLM phrasing (see llm_phrasing.py). None until set via .env -
-    # phrasing falls back to a deterministic template when unset, so the
-    # rest of the app works without this configured.
-    groq_api_key: str | None = None
-    groq_model: str = "llama-3.1-8b-instant"
+    # Phase 3 LLM phrasing (see llm_phrasing.py/chat_ai.py). None until set
+    # via .env - phrasing falls back to a deterministic template when
+    # unset, so the rest of the app works without this configured.
+    #
+    # Switched from Groq (llama-3.1-8b-instant) to the real Anthropic API
+    # 2026-08-19 - llama-3.1-8b-instant was found to be fully decommissioned
+    # (a direct call to Groq's API returned "model_not_found"), which had
+    # been silently invisible because every LLM call here already falls
+    # back to a deterministic template on any failure - every phrased
+    # answer had quietly been template-only for at least ~2.5 weeks (the
+    # default hadn't been touched since 2026-07-31) with no visible error
+    # anywhere. This is a real Anthropic API key (console.anthropic.com,
+    # billed per-token) - NOT the same credential as a claude.ai Pro/Team
+    # subscription login, which has no supported way to authenticate
+    # server-side backend calls at all.
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-sonnet-5"
 
     # NJ Transit developer account - approved 2026-08-01, see
     # app/transit/njt_rail.py and OPEN_QUESTIONS.md.

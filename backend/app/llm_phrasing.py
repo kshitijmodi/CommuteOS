@@ -6,10 +6,16 @@ This is the highest-risk-of-hallucination surface in the whole system
 (inventing a departure time has a real consequence - a missed train), so
 the prompt is deliberately narrow and the temperature is low.
 
-Uses an OpenAI-compatible client pointed at Groq (the user's available API
-key) rather than OpenAI/Gemini directly as the PRD's tech stack lists -
-Groq's API is OpenAI-compatible, so this is a one-line base_url swap away
-from either of those if needed later.
+Uses the real Anthropic API (claude-sonnet-5) - switched from Groq
+(llama-3.1-8b-instant) 2026-08-19 after that model was found to be fully
+decommissioned (Groq's API returned "model_not_found" on a direct call).
+This had been silently invisible for at least ~2.5 weeks because of the
+very fail-soft design described below - every phrased answer had quietly
+been template-only that whole time, with no visible error anywhere. This
+is a real Anthropic API key (console.anthropic.com, billed per-token) -
+NOT the same credential as a claude.ai Pro/Team subscription login,
+which has no supported way to authenticate server-side backend calls at
+all.
 
 Fails soft, not hard: if no API key is configured or the call errors, this
 falls back to a deterministic template (see _template_phrase) instead of
@@ -20,7 +26,7 @@ the PRD (phrasing only, never the decision).
 
 from typing import TYPE_CHECKING
 
-from openai import OpenAI, OpenAIError
+from anthropic import Anthropic, AnthropicError
 
 from .core.config import settings
 from .decision_engine import RankedRoute
@@ -32,6 +38,16 @@ if TYPE_CHECKING:
     # top-level import here would be a circular import. TYPE_CHECKING
     # guards keep the type hint below without ever executing the import.
     from .commute_engine import CommuteRecommendation
+
+
+def _extract_text(response) -> str | None:
+    """response.content is a list of blocks, not a single message the
+    way the old OpenAI-shaped response was - claude-sonnet-5 in
+    particular can return a "thinking" block ahead of the real "text"
+    block, so content[0] can't be assumed to be it. Shared by every
+    phrase_* function below rather than duplicated four times."""
+    text = next((block.text for block in response.content if block.type == "text"), None)
+    return text.strip() if text else None
 
 _SYSTEM_PROMPT = """You are a transit assistant. You will be given a single \
 JSON object describing one recommended route: mode, label, predicted \
@@ -52,13 +68,10 @@ natural certainty in your tone instead.
 
 
 def phrase_recommendation(route: RankedRoute) -> str:
-    if not settings.groq_api_key:
+    if not settings.anthropic_api_key:
         return _template_phrase(route)
 
-    client = OpenAI(
-        api_key=settings.groq_api_key,
-        base_url="https://api.groq.com/openai/v1",
-    )
+    client = Anthropic(api_key=settings.anthropic_api_key)
 
     payload = {
         "mode": route.mode,
@@ -68,18 +81,15 @@ def phrase_recommendation(route: RankedRoute) -> str:
     }
 
     try:
-        response = client.chat.completions.create(
-            model=settings.groq_model,
-            temperature=0.2,
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            system=_SYSTEM_PROMPT,
             max_tokens=100,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": str(payload)},
-            ],
+            messages=[{"role": "user", "content": str(payload)}],
         )
-        text = response.choices[0].message.content
-        return text.strip() if text else _template_phrase(route)
-    except OpenAIError:
+        text = _extract_text(response)
+        return text if text else _template_phrase(route)
+    except AnthropicError:
         return _template_phrase(route)
 
 
@@ -124,13 +134,10 @@ def phrase_comparison(winner: RankedRoute, alternatives: list[RankedRoute]) -> s
     if not alternatives:
         return phrase_recommendation(winner)
 
-    if not settings.groq_api_key:
+    if not settings.anthropic_api_key:
         return _template_comparison_phrase(winner, alternatives)
 
-    client = OpenAI(
-        api_key=settings.groq_api_key,
-        base_url="https://api.groq.com/openai/v1",
-    )
+    client = Anthropic(api_key=settings.anthropic_api_key)
 
     def _payload(route: RankedRoute) -> dict:
         return {
@@ -146,18 +153,15 @@ def phrase_comparison(winner: RankedRoute, alternatives: list[RankedRoute]) -> s
     }
 
     try:
-        response = client.chat.completions.create(
-            model=settings.groq_model,
-            temperature=0.2,
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            system=_COMPARISON_SYSTEM_PROMPT,
             max_tokens=120,
-            messages=[
-                {"role": "system", "content": _COMPARISON_SYSTEM_PROMPT},
-                {"role": "user", "content": str(payload)},
-            ],
+            messages=[{"role": "user", "content": str(payload)}],
         )
-        text = response.choices[0].message.content
-        return text.strip() if text else _template_comparison_phrase(winner, alternatives)
-    except OpenAIError:
+        text = _extract_text(response)
+        return text if text else _template_comparison_phrase(winner, alternatives)
+    except AnthropicError:
         return _template_comparison_phrase(winner, alternatives)
 
 
@@ -211,10 +215,10 @@ def phrase_schedule_notification(
     decision_engine.rank_routes already picked - this function only
     phrases it, never picks it) and ignored otherwise.
     """
-    if not settings.groq_api_key:
+    if not settings.anthropic_api_key:
         return _template_schedule_phrase(assessment, usual_label, live_predicted_arrival, substitute)
 
-    client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+    client = Anthropic(api_key=settings.anthropic_api_key)
 
     payload = {
         "severity": assessment.severity.value,
@@ -234,22 +238,19 @@ def phrase_schedule_notification(
     }
 
     try:
-        response = client.chat.completions.create(
-            model=settings.groq_model,
-            temperature=0.2,
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            system=_SCHEDULE_SYSTEM_PROMPT,
             max_tokens=120,
-            messages=[
-                {"role": "system", "content": _SCHEDULE_SYSTEM_PROMPT},
-                {"role": "user", "content": str(payload)},
-            ],
+            messages=[{"role": "user", "content": str(payload)}],
         )
-        text = response.choices[0].message.content
+        text = _extract_text(response)
         return (
-            text.strip()
+            text
             if text
             else _template_schedule_phrase(assessment, usual_label, live_predicted_arrival, substitute)
         )
-    except OpenAIError:
+    except AnthropicError:
         return _template_schedule_phrase(assessment, usual_label, live_predicted_arrival, substitute)
 
 
@@ -307,10 +308,10 @@ def phrase_commute_recommendation(recommendation: "CommuteRecommendation") -> st
     comparison functions) since this is the newest caller and there's no
     existing call-site convention to match.
     """
-    if not settings.groq_api_key:
+    if not settings.anthropic_api_key:
         return _template_commute_phrase(recommendation)
 
-    client = OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
+    client = Anthropic(api_key=settings.anthropic_api_key)
 
     def _payload(route: RankedRoute) -> dict:
         return {
@@ -327,18 +328,15 @@ def phrase_commute_recommendation(recommendation: "CommuteRecommendation") -> st
     }
 
     try:
-        response = client.chat.completions.create(
-            model=settings.groq_model,
-            temperature=0.2,
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            system=_COMMUTE_SYSTEM_PROMPT,
             max_tokens=120,
-            messages=[
-                {"role": "system", "content": _COMMUTE_SYSTEM_PROMPT},
-                {"role": "user", "content": str(payload)},
-            ],
+            messages=[{"role": "user", "content": str(payload)}],
         )
-        text = response.choices[0].message.content
-        return text.strip() if text else _template_commute_phrase(recommendation)
-    except OpenAIError:
+        text = _extract_text(response)
+        return text if text else _template_commute_phrase(recommendation)
+    except AnthropicError:
         return _template_commute_phrase(recommendation)
 
 
